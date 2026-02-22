@@ -17,5 +17,8 @@ systemctl restart fail2ban
 ## Usefull commands
 
 ```
+systemctl status sing-box.service
+
 fail2ban-client  status openvpn-server
 fail2ban-client  status sshd
+```
