@@ -1,0 +1,24 @@
+---
+# Создаём CCD-файл только для пиров с явным fixed_ip или iroute.
+# state: revoked — CCD удаляем.
+
+- name: CCD-файлы для статичных пиров
+  ansible.builtin.template:
+    src: ccd-peer.j2
+    dest: "{{ ovpn_ccd_dir }}/{{ item.cn }}"
+    mode: "0644"
+  loop: "{{ ovpn_peers }}"
+  loop_control:
+    label: "{{ item.cn }}"
+  when:
+    - item.state | default('present') == 'present'
+    - (item.fixed_ip is defined) or (item.iroute is defined and item.iroute | length > 0)
+
+- name: Удалить CCD у отозванных пиров
+  ansible.builtin.file:
+    path: "{{ ovpn_ccd_dir }}/{{ item.cn }}"
+    state: absent
+  loop: "{{ ovpn_peers }}"
+  loop_control:
+    label: "{{ item.cn }}"
+  when: item.state | default('present') == 'revoked'

@@ -1,0 +1,50 @@
+.PHONY: help check plan apply status switch refresh-nodes lint vault-edit vault-encrypt-staging facts
+
+ANSIBLE       ?= ansible-playbook
+INV           ?= ansible/inventory/hosts.yml
+HOST          ?= vpn1
+VAULT_PASS    ?= .vault_pass
+ANSIBLE_FLAGS ?= --vault-password-file=$(VAULT_PASS)
+
+help:
+	@echo "make check            — syntax check всех playbooks"
+	@echo "make plan             — dry-run site.yml (--check --diff)"
+	@echo "make apply            — применить site.yml (с подтверждением diff)"
+	@echo "make status           — собрать факты и показать состояние сервисов"
+	@echo "make refresh-nodes    — обновить /etc/sing-box/nodes.json из подписки"
+	@echo "make switch INDEX=2   — переключить sing-box на ноду #2"
+	@echo "make switch NEXT=1    — следующая нода"
+	@echo "make lint             — ansible-lint (если установлен)"
+	@echo "make vault-edit       — редактировать group_vars/all/vault.yml"
+	@echo "make facts            — снять и закешировать факты с боевого хоста"
+
+check:
+	@$(ANSIBLE) --syntax-check ansible/playbooks/site.yml
+
+plan:
+	@$(ANSIBLE) ansible/playbooks/site.yml --check --diff $(ANSIBLE_FLAGS)
+
+apply:
+	@$(ANSIBLE) ansible/playbooks/site.yml --diff $(ANSIBLE_FLAGS)
+
+status:
+	@$(ANSIBLE) ansible/playbooks/status.yml $(ANSIBLE_FLAGS)
+
+refresh-nodes:
+	@$(ANSIBLE) ansible/playbooks/refresh-nodes.yml $(ANSIBLE_FLAGS)
+
+switch:
+	@$(ANSIBLE) ansible/playbooks/switch-node.yml \
+		-e "switch_mode=$(if $(INDEX),index,$(if $(NAME),name,$(if $(NEXT),next,first)))" \
+		-e "switch_index=$(INDEX)" \
+		-e "switch_name=$(NAME)" \
+		$(ANSIBLE_FLAGS)
+
+lint:
+	@command -v ansible-lint >/dev/null && ansible-lint ansible/playbooks/site.yml || echo "ansible-lint not installed"
+
+vault-edit:
+	@ansible-vault edit ansible/group_vars/all/vault.yml --vault-password-file=$(VAULT_PASS)
+
+facts:
+	@$(ANSIBLE) ansible/playbooks/status.yml --tags facts $(ANSIBLE_FLAGS)

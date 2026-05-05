@@ -1,0 +1,8 @@
+---
+- name: Конфиг сервера OpenVPN
+  ansible.builtin.template:
+    src: server.conf.j2
+    dest: "{{ ovpn_server_dir }}/server.conf"
+    mode: "0644"
+    backup: true
+  notify: restart openvpn-server

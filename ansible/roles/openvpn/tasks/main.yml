@@ -1,0 +1,54 @@
+---
+- name: Установить пакеты OpenVPN
+  ansible.builtin.apt:
+    name:
+      - openvpn
+      - easy-rsa
+    state: present
+
+- name: Каталоги OpenVPN
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ ovpn_server_dir }}"
+    - "{{ ovpn_keys_dir }}"
+    - "{{ ovpn_ccd_dir }}"
+    - "{{ ovpn_log_dir }}"
+
+- name: PKI bootstrap (только если ещё нет)
+  ansible.builtin.include_tasks: pki.yml
+
+- name: Конфиг сервера и сертификаты
+  ansible.builtin.include_tasks: server.yml
+
+- name: CCD (per-client overrides)
+  ansible.builtin.include_tasks: ccd.yml
+
+- name: nftables — forward + masquerade для tun0
+  ansible.builtin.copy:
+    dest: /etc/nftables.d/openvpn.nft
+    mode: "0644"
+    content: |
+      table inet openvpn_filter {
+        chain forward {
+          type filter hook forward priority 0; policy accept;
+          iifname "tun0" oifname "tun0" accept
+          iifname "tun0" oifname "{{ wan_iface }}" accept
+          iifname "{{ wan_iface }}" oifname "tun0" ct state established,related accept
+        }
+      }
+      table ip openvpn_nat {
+        chain postrouting {
+          type nat hook postrouting priority 100; policy accept;
+          oifname "{{ wan_iface }}" ip saddr {{ openvpn_subnet_cidr }} masquerade
+        }
+      }
+  notify: reload nftables
+
+- name: Включить и запустить openvpn-server@server
+  ansible.builtin.systemd:
+    name: openvpn-server@server.service
+    enabled: true
+    state: started

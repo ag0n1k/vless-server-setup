@@ -1,0 +1,35 @@
+# {{ ansible_managed }}
+# Единая TPROXY-таблица для VPN-интерфейсов: {{ tproxy_capture_ifaces | join(', ') }}.
+
+table inet vpn_tproxy {
+  chain prerouting {
+    type filter hook prerouting priority mangle; policy accept;
+
+    # local-bound трафик пропускаем напрямую
+    fib daddr type local accept
+
+    # приватные сети — без проксирования
+    ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } accept
+
+{% for iface in tproxy_capture_ifaces %}
+    iifname "{{ iface }}" meta l4proto { tcp, udp } tproxy to :{{ singbox_tproxy_port }} meta mark set {{ tproxy_fwmark }} accept
+{% endfor %}
+  }
+}
+
+# Leak-guard: если sing-box упал — VPN-трафик не уходит напрямую через WAN.
+# Также блокируем внешние подключения к tproxy-порту.
+table inet vpn_guard {
+  chain forward {
+    type filter hook forward priority filter - 10; policy accept;
+{% for iface in tproxy_capture_ifaces %}
+    iifname "{{ iface }}" oifname "{{ wan_iface }}" drop
+{% endfor %}
+  }
+
+  chain input {
+    type filter hook input priority filter - 10; policy accept;
+    iifname "{{ wan_iface }}" tcp dport {{ singbox_tproxy_port }} drop
+    iifname "{{ wan_iface }}" udp dport {{ singbox_tproxy_port }} drop
+  }
+}

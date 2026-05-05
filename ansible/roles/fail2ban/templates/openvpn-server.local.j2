@@ -1,0 +1,10 @@
+[openvpn-server]
+enabled  = true
+filter   = openvpn-server
+port     = {{ openvpn_port }}
+protocol = {{ openvpn_proto }}
+logpath  = {{ f2b_ovpn_logpath }}
+backend  = polling
+maxretry = {{ f2b_ovpn_maxretry }}
+findtime = {{ f2b_ovpn_findtime }}
+bantime  = {{ f2b_ovpn_bantime }}

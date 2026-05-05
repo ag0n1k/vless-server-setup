@@ -1,0 +1,122 @@
+---
+# Переключение sing-box на другую ноду из nodes.json.
+# Вызов:
+#   ansible-playbook switch-node.yml -e switch_mode=next
+#   ansible-playbook switch-node.yml -e switch_mode=index -e switch_index=3
+#   ansible-playbook switch-node.yml -e switch_mode=name  -e switch_name=Geneva
+#   ansible-playbook switch-node.yml -e switch_mode=first
+#   ansible-playbook switch-node.yml -e switch_mode=random
+
+- name: Switch sing-box node
+  hosts: vpn1
+  become: true
+  gather_facts: true
+  vars:
+    switch_mode: next
+    switch_index: ""
+    switch_name: ""
+    sb_cfg: /etc/sing-box/config.json
+    sb_nodes: /etc/sing-box/nodes.json
+    sb_current: /etc/sing-box/current-node.json
+    singbox_socks_port: 1080
+    singbox_tproxy_port: 7895
+    singbox_log_level: info
+
+  tasks:
+    - name: Прочитать nodes.json
+      ansible.builtin.slurp: { src: "{{ sb_nodes }}" }
+      register: _nodes_b64
+
+    - name: Прочитать current-node.json (если есть)
+      ansible.builtin.slurp: { src: "{{ sb_current }}" }
+      register: _cur_b64
+      failed_when: false
+
+    - name: Разобрать nodes
+      ansible.builtin.set_fact:
+        _nodes: "{{ (_nodes_b64.content | b64decode | from_json).nodes }}"
+
+    - name: Текущий индекс
+      ansible.builtin.set_fact:
+        _current_idx: >-
+          {{ ((_cur_b64.content | b64decode | from_json).index | default(0))
+             if (_cur_b64.content is defined and (_cur_b64.content | length) > 0)
+             else 0 }}
+
+    - name: Индекс при switch_mode=next
+      ansible.builtin.set_fact:
+        _new_idx: "{{ ((_current_idx | int) + 1) % (_nodes | length) }}"
+      when: switch_mode == 'next'
+
+    - name: Индекс при switch_mode=first
+      ansible.builtin.set_fact:
+        _new_idx: 0
+      when: switch_mode == 'first'
+
+    - name: Индекс при switch_mode=random
+      ansible.builtin.set_fact:
+        _new_idx: "{{ (_nodes | length) | random }}"
+      when: switch_mode == 'random'
+
+    - name: Индекс при switch_mode=index
+      ansible.builtin.set_fact:
+        _new_idx: "{{ (switch_index | int) - 1 }}"
+      when: switch_mode == 'index'
+
+    - name: Индекс при switch_mode=name (поиск по подстроке label)
+      ansible.builtin.set_fact:
+        _new_idx: >-
+          {{ (_nodes
+              | map(attribute='label')
+              | list
+              | zip(range(_nodes | length))
+              | selectattr('0', 'search', switch_name)
+              | map(attribute='1')
+              | list
+              | first
+              | default(0)) }}
+      when: switch_mode == 'name'
+
+    - name: Проверить границы индекса
+      ansible.builtin.assert:
+        that:
+          - (_new_idx | int) >= 0
+          - (_new_idx | int) < (_nodes | length)
+        fail_msg: "Индекс {{ _new_idx }} вне диапазона 0..{{ (_nodes | length) - 1 }}"
+
+    - name: Выбрать ноду
+      ansible.builtin.set_fact:
+        _node: "{{ _nodes[_new_idx | int] }}"
+
+    - name: Сгенерировать новый config.json
+      ansible.builtin.command: >-
+        /usr/local/lib/sb_config_gen.py
+        '{{ _node | to_json }}' '{{ sb_cfg }}'
+        {{ singbox_socks_port }} {{ singbox_tproxy_port }} {{ singbox_log_level }}
+      no_log: true
+
+    - name: Валидация конфига
+      ansible.builtin.command: sing-box check -c {{ sb_cfg }}
+      changed_when: false
+
+    - name: Перезапустить sing-box
+      ansible.builtin.systemd:
+        name: sing-box.service
+        state: restarted
+
+    - name: Сохранить current-node.json
+      ansible.builtin.copy:
+        dest: "{{ sb_current }}"
+        mode: "0600"
+        content: |
+          {
+            "index": {{ _new_idx | int }},
+            "label": {{ _node.label | to_json }},
+            "server": {{ _node.server | to_json }},
+            "port": {{ _node.port | int }},
+            "switched_at": "{{ ansible_date_time.iso8601 }}"
+          }
+
+    - name: Готово
+      ansible.builtin.debug:
+        msg: "Переключено на #{{ (_new_idx | int) + 1 }}: {{ _node.label }} ({{ _node.server }}:{{ _node.port }})"

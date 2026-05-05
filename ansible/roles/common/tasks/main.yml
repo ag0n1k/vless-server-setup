@@ -1,0 +1,57 @@
+---
+- name: Установить базовые пакеты
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - jq
+      - python3
+      - nftables
+      - iproute2
+      - gawk
+      - sed
+      - grep
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Включить sysctl-параметры
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-vpn-gateway.conf
+    state: present
+    reload: true
+  loop: "{{ sysctl_extras | dict2items }}"
+
+- name: Per-iface rp_filter=0 (нужно для TPROXY)
+  ansible.posix.sysctl:
+    name: "net.ipv4.conf.{{ item }}.rp_filter"
+    value: "0"
+    sysctl_file: /etc/sysctl.d/99-vpn-gateway.conf
+    state: present
+    reload: true
+  loop: "{{ ([wan_iface] + tproxy_capture_ifaces) | unique }}"
+  when: item | length > 0
+
+- name: Включить системную nftables-службу
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+    state: started
+
+- name: Базовый /etc/nftables.conf c include для /etc/nftables.d
+  ansible.builtin.copy:
+    dest: /etc/nftables.conf
+    content: |
+      #!/usr/sbin/nft -f
+      flush ruleset
+      include "/etc/nftables.d/*.nft"
+    mode: "0644"
+  notify: reload nftables
+
+- name: Каталог /etc/nftables.d
+  ansible.builtin.file:
+    path: /etc/nftables.d
+    state: directory
+    mode: "0755"

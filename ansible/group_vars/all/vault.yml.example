@@ -1,0 +1,17 @@
+---
+# ──────────────────────────────────────────────────────────────────────
+# Шаблон vault.yml. Реальный vault.yml должен быть зашифрован
+# командой:  ansible-vault encrypt ansible/group_vars/all/vault.yml
+#
+# В .gitignore прописано: ansible/group_vars/all/vault.yml — не коммитим.
+# Этот example-файл — public, в репо.
+# ──────────────────────────────────────────────────────────────────────
+
+# Подписки sing-box (один или несколько URL через пробел в каждом значении).
+# Поддерживаются ss:// и vless:// в plain или base64-закодированном теле.
+vault_subscription_urls: >-
+  https://vpnd.io/subscription/ss/<TOKEN>/?ru=1
+
+# (опционально) Пароль для генерации новых клиентских OVPN-ключей с passphrase.
+# Если используешь nopass-режим — оставь пустым.
+vault_ovpn_client_passphrase: ""

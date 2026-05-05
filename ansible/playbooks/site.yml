@@ -1,0 +1,40 @@
+---
+- name: Configure VPN gateway (OpenVPN + WireGuard + sing-box + TPROXY)
+  hosts: vpn1
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Загрузить state-файлы
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - "{{ playbook_dir }}/../state/ovpn_peers.yml"
+        - "{{ playbook_dir }}/../state/wg_peers.yml"
+      tags: [always]
+
+    - name: Определить WAN-интерфейс если не задан
+      ansible.builtin.shell: ip route show default 0.0.0.0/0 | awk '{print $5; exit}'
+      register: wan_detect
+      changed_when: false
+      when: wan_iface is not defined or wan_iface | length == 0
+      tags: [always]
+
+    - name: Зафиксировать wan_iface
+      ansible.builtin.set_fact:
+        wan_iface: "{{ wan_iface | default(wan_detect.stdout, true) }}"
+      tags: [always]
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: fail2ban
+      tags: [fail2ban]
+    - role: openvpn
+      tags: [openvpn]
+    - role: wireguard
+      tags: [wireguard]
+    - role: singbox
+      tags: [singbox]
+    - role: tproxy
+      tags: [tproxy]

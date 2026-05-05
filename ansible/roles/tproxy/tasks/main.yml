@@ -1,0 +1,38 @@
+---
+- name: Прописать routing-таблицу tproxy в /etc/iproute2/rt_tables
+  ansible.builtin.lineinfile:
+    path: "{{ tproxy_rt_tables }}"
+    regexp: "^\\s*\\d+\\s+{{ tproxy_rt_table_name }}\\b"
+    line: "{{ tproxy_rt_table_id }} {{ tproxy_rt_table_name }}"
+    state: present
+
+- name: Очистить дублирующиеся ip rule fwmark (если они накопились)
+  ansible.builtin.shell: |
+    set -e
+    # удаляем все правила с этим fwmark, потом добавляем одно
+    while ip -4 rule show | grep -qE "fwmark 0x{{ '%x' | format(tproxy_fwmark) }} lookup {{ tproxy_rt_table_name }}"; do
+      ip -4 rule del fwmark {{ tproxy_fwmark }} lookup {{ tproxy_rt_table_name }} || break
+    done
+    ip -4 rule add fwmark {{ tproxy_fwmark }} lookup {{ tproxy_rt_table_name }} pref 100
+  changed_when: true
+
+- name: Маршрут local default в таблице tproxy
+  ansible.builtin.shell: |
+    set -e
+    ip route flush table {{ tproxy_rt_table_name }} 2>/dev/null || true
+    ip route add local 0.0.0.0/0 dev lo table {{ tproxy_rt_table_name }}
+  changed_when: true
+
+- name: Снять старые TPROXY-таблицы (если остались с прошлой схемы)
+  ansible.builtin.shell: |
+    nft list table inet vpnclients_tproxy >/dev/null 2>&1 && nft delete table inet vpnclients_tproxy || true
+    nft list table inet vpnclients_guard  >/dev/null 2>&1 && nft delete table inet vpnclients_guard  || true
+    nft list table inet wg_tproxy         >/dev/null 2>&1 && nft delete table inet wg_tproxy         || true
+  changed_when: true
+
+- name: Единая TPROXY-таблица для всех VPN-интерфейсов
+  ansible.builtin.template:
+    src: tproxy.nft.j2
+    dest: "{{ tproxy_nft_path }}"
+    mode: "0644"
+  notify: reload nftables

@@ -1,0 +1,18 @@
+---
+- name: Обновить sing-box nodes.json из подписок
+  hosts: vpn1
+  become: true
+  gather_facts: false
+
+  vars_prompt: []
+
+  tasks:
+    - name: Скачать и распарсить подписки
+      ansible.builtin.command: >-
+        /usr/local/lib/sb_parse_subs.py "{{ vault_subscription_urls }}" "/etc/sing-box/nodes.json"
+      register: parse_out
+      no_log: true
+
+    - name: Результат
+      ansible.builtin.debug:
+        msg: "{{ parse_out.stdout }}"

@@ -1,0 +1,43 @@
+port {{ openvpn_port }}
+proto {{ openvpn_proto }}
+dev tun
+
+user nobody
+group nogroup
+persist-key
+persist-tun
+
+{% if openvpn_client_to_client %}
+client-to-client
+{% endif %}
+client-config-dir {{ ovpn_ccd_dir }}
+
+topology subnet
+server {{ openvpn_subnet_addr }} {{ openvpn_subnet_mask }}
+
+# Full-tunnel + DNS
+push "redirect-gateway def1 bypass-dhcp"
+{% for dns in openvpn_dns %}
+push "dhcp-option DNS {{ dns }}"
+{% endfor %}
+
+# Crypto
+cipher {{ openvpn_cipher }}
+data-ciphers {{ openvpn_data_ciphers }}
+auth {{ openvpn_auth_digest }}
+
+# PKI
+ca {{ ovpn_keys_dir }}/ca.crt
+cert {{ ovpn_keys_dir }}/server.crt
+key {{ ovpn_keys_dir }}/server.key
+dh none
+crl-verify {{ ovpn_keys_dir }}/crl.pem
+
+tls-crypt {{ ovpn_keys_dir }}/ta.key
+
+keepalive {{ openvpn_keepalive }}
+explicit-exit-notify 1
+
+verb 3
+status {{ ovpn_log_dir }}/status.log
+log-append {{ ovpn_log_dir }}/openvpn.log

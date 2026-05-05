@@ -1,0 +1,68 @@
+---
+# ──────────────────────────────────────────────────────────────────────
+# PKI bootstrap. Безопасный для повторного прогона: ничего не удаляет.
+#   • если pki/ca.crt уже есть — пропускаем init/build-ca/build-server
+#   • DH не генерируем (используем ECDHE-only data-ciphers, dh none)
+#   • ta.key создаётся только если отсутствует
+# ──────────────────────────────────────────────────────────────────────
+
+- name: Проверить наличие easyrsa CA
+  ansible.builtin.stat:
+    path: "{{ ovpn_easyrsa_dir }}/pki/ca.crt"
+  register: easyrsa_ca
+
+- name: Развернуть easy-rsa каркас (только если PKI ещё нет)
+  block:
+    - name: Создать каталог easy-rsa
+      ansible.builtin.file:
+        path: "{{ ovpn_easyrsa_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Скопировать /usr/share/easy-rsa в рабочий каталог
+      ansible.builtin.shell: cp -a /usr/share/easy-rsa/* {{ ovpn_easyrsa_dir }}/
+      args:
+        creates: "{{ ovpn_easyrsa_dir }}/easyrsa"
+
+    - name: easyrsa init-pki
+      ansible.builtin.command: ./easyrsa --batch init-pki
+      args:
+        chdir: "{{ ovpn_easyrsa_dir }}"
+        creates: "{{ ovpn_easyrsa_dir }}/pki/private"
+
+    - name: easyrsa build-ca nopass
+      ansible.builtin.command: ./easyrsa --batch build-ca nopass
+      args:
+        chdir: "{{ ovpn_easyrsa_dir }}"
+        creates: "{{ ovpn_easyrsa_dir }}/pki/ca.crt"
+
+    - name: easyrsa build-server-full
+      ansible.builtin.command: ./easyrsa --batch build-server-full server nopass
+      args:
+        chdir: "{{ ovpn_easyrsa_dir }}"
+        creates: "{{ ovpn_easyrsa_dir }}/pki/issued/server.crt"
+
+    - name: easyrsa gen-crl
+      ansible.builtin.command: ./easyrsa --batch gen-crl
+      args:
+        chdir: "{{ ovpn_easyrsa_dir }}"
+        creates: "{{ ovpn_easyrsa_dir }}/pki/crl.pem"
+  when: not easyrsa_ca.stat.exists
+
+- name: Создать tls-crypt key (если ещё нет)
+  ansible.builtin.command: openvpn --genkey --secret {{ ovpn_keys_dir }}/ta.key
+  args:
+    creates: "{{ ovpn_keys_dir }}/ta.key"
+
+- name: Скопировать сертификаты в /etc/openvpn/server/keys
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    remote_src: true
+    mode: "{{ item.mode }}"
+    force: false
+  loop:
+    - { src: "{{ ovpn_easyrsa_dir }}/pki/ca.crt",             dest: "{{ ovpn_keys_dir }}/ca.crt",     mode: "0644" }
+    - { src: "{{ ovpn_easyrsa_dir }}/pki/issued/server.crt",  dest: "{{ ovpn_keys_dir }}/server.crt", mode: "0644" }
+    - { src: "{{ ovpn_easyrsa_dir }}/pki/private/server.key", dest: "{{ ovpn_keys_dir }}/server.key", mode: "0600" }
+    - { src: "{{ ovpn_easyrsa_dir }}/pki/crl.pem",            dest: "{{ ovpn_keys_dir }}/crl.pem",    mode: "0644" }

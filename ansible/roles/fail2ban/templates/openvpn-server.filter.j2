@@ -1,0 +1,10 @@
+[Definition]
+failregex =
+  ^.*TLS Error: incoming packet authentication failed from \[AF_INET\]<HOST>:[0-9]+.*$
+  ^.*TLS Error: incoming packet authentication failed from <HOST>:[0-9]+.*$
+  ^.*<HOST>:[0-9]{4,5} TLS Auth Error:.*$
+  ^.*<HOST>:[0-9]{4,5} VERIFY ERROR:.*$
+  ^.*<HOST>:[0-9]{4,5} TLS Error: TLS handshake failed.*$
+  ^.*TLS Error: TLS key negotiation failed to occur within .* seconds.*\[AF_INET\]<HOST>:[0-9]+.*$
+
+ignoreregex =

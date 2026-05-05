@@ -1,0 +1,78 @@
+---
+- name: Установить WireGuard
+  ansible.builtin.apt:
+    name: wireguard
+    state: present
+
+- name: Каталог /etc/wireguard
+  ansible.builtin.file:
+    path: "{{ wg_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Сгенерировать server priv key (только если ещё нет)
+  ansible.builtin.shell: |
+    set -e
+    umask 077
+    wg genkey > {{ wg_server_priv_path }}
+    wg pubkey < {{ wg_server_priv_path }} > {{ wg_server_pub_path }}
+  args:
+    creates: "{{ wg_server_priv_path }}"
+
+- name: Прочитать server priv key
+  ansible.builtin.slurp:
+    src: "{{ wg_server_priv_path }}"
+  register: wg_server_priv_b64
+  no_log: true
+
+- name: Прочитать server pub key
+  ansible.builtin.slurp:
+    src: "{{ wg_server_pub_path }}"
+  register: wg_server_pub_b64
+
+- name: Сохранить ключи как факты
+  ansible.builtin.set_fact:
+    wg_server_priv: "{{ wg_server_priv_b64.content | b64decode | trim }}"
+    wg_server_pub_actual: "{{ wg_server_pub_b64.content | b64decode | trim }}"
+  no_log: true
+
+- name: Предупредить если pubkey в host_vars не совпадает с реальным
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: host_vars/{{ inventory_hostname }}/vars.yml: wg_server_pubkey={{ wg_server_pubkey }}
+      не совпадает с реальным {{ wg_server_pub_actual }}
+  when:
+    - wg_server_pubkey is defined
+    - wg_server_pubkey != wg_server_pub_actual
+
+- name: Прочитать PSK мап из vault (если есть)
+  ansible.builtin.set_fact:
+    _wg_psk_map: "{{ vault_wg_peer_psks | default({}) }}"
+  no_log: true
+
+- name: Сгенерировать конфиг wg0
+  ansible.builtin.template:
+    src: wg0.conf.j2
+    dest: "{{ wg_dir }}/{{ wg_interface }}.conf"
+    mode: "0600"
+    backup: true
+  notify: reload wg0
+
+- name: nftables — NAT для wg subnet
+  ansible.builtin.copy:
+    dest: /etc/nftables.d/wireguard.nft
+    mode: "0644"
+    content: |
+      table ip wg_nat {
+        chain postrouting {
+          type nat hook postrouting priority 100; policy accept;
+          oifname "{{ wan_iface }}" ip saddr {{ wg_subnet }} masquerade
+        }
+      }
+  notify: reload nftables
+
+- name: Включить wg-quick@{{ wg_interface }}
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ wg_interface }}.service"
+    enabled: true
+    state: started

@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+[Interface]
+Address    = {{ wg_server_addr }}
+ListenPort = {{ wg_port }}
+PrivateKey = {{ wg_server_priv }}
+
+{% for peer in wg_peers if peer.state | default('present') == 'present' %}
+[Peer]
+# {{ peer.name }}{% if peer.note is defined %} — {{ peer.note }}{% endif %}
+
+PublicKey  = {{ peer.pubkey }}
+{% if _wg_psk_map[peer.pubkey] is defined %}
+PresharedKey = {{ _wg_psk_map[peer.pubkey] }}
+{% endif %}
+AllowedIPs = {{ peer.allowed_ips | join(', ') }}
+{% if peer.persistent_keepalive is defined %}
+PersistentKeepalive = {{ peer.persistent_keepalive }}
+{% endif %}
+
+{% endfor %}

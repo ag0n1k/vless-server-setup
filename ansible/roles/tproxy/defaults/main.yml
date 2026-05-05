@@ -1,0 +1,3 @@
+---
+tproxy_nft_path: /etc/nftables.d/tproxy.nft
+tproxy_rt_tables: /etc/iproute2/rt_tables

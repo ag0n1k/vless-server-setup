@@ -1,0 +1,10 @@
+---
+ovpn_dir: /etc/openvpn
+ovpn_server_dir: /etc/openvpn/server
+ovpn_keys_dir: /etc/openvpn/server/keys
+ovpn_easyrsa_dir: /etc/openvpn/easy-rsa
+ovpn_ccd_dir: /etc/openvpn/ccd
+ovpn_log_dir: /var/log/openvpn
+
+# Куда складывать сгенерированные .ovpn (только если CN явно запрошен).
+ovpn_clients_out_dir: /root/ovpn-clients

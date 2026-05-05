@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+{% if item.fixed_ip is defined %}
+ifconfig-push {{ item.fixed_ip }} {{ openvpn_subnet_mask }}
+{% endif %}
+{% for net in (item.iroute | default([])) %}
+{% set parts = net.split('/') %}
+{% set ip = parts[0] %}
+{% set mask_bits = parts[1] | int %}
+{% set mask = ((((1 << 32) - 1) << (32 - mask_bits)) & ((1 << 32) - 1)) %}
+iroute {{ ip }} {{ ((mask >> 24) & 0xff) }}.{{ ((mask >> 16) & 0xff) }}.{{ ((mask >> 8) & 0xff) }}.{{ (mask & 0xff) }}
+{% endfor %}

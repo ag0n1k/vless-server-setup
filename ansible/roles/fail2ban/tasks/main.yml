@@ -1,0 +1,52 @@
+---
+- name: Установить fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+
+- name: Каталог OpenVPN-логов (нужен до старта f2b)
+  ansible.builtin.file:
+    path: "{{ f2b_ovpn_logpath | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Touch OpenVPN-лог-файл (чтобы polling-backend не падал)
+  ansible.builtin.copy:
+    dest: "{{ f2b_ovpn_logpath }}"
+    content: ""
+    force: false
+    mode: "0644"
+
+- name: jail.d/00-defaults.local
+  ansible.builtin.template:
+    src: 00-defaults.local.j2
+    dest: /etc/fail2ban/jail.d/00-defaults.local
+    mode: "0644"
+  notify: restart fail2ban
+
+- name: jail.d/sshd.local
+  ansible.builtin.template:
+    src: sshd.local.j2
+    dest: /etc/fail2ban/jail.d/sshd.local
+    mode: "0644"
+  notify: restart fail2ban
+
+- name: filter.d/openvpn-server.local
+  ansible.builtin.template:
+    src: openvpn-server.filter.j2
+    dest: /etc/fail2ban/filter.d/openvpn-server.local
+    mode: "0644"
+  notify: restart fail2ban
+
+- name: jail.d/openvpn-server.local
+  ansible.builtin.template:
+    src: openvpn-server.local.j2
+    dest: /etc/fail2ban/jail.d/openvpn-server.local
+    mode: "0644"
+  notify: restart fail2ban
+
+- name: Включить и запустить fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    enabled: true
+    state: started

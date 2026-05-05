@@ -1,0 +1,4 @@
+---
+wg_dir: /etc/wireguard
+wg_server_priv_path: /etc/wireguard/server.key
+wg_server_pub_path: /etc/wireguard/server.key.pub

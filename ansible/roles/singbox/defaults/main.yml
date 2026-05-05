@@ -1,0 +1,6 @@
+---
+sb_dir: /etc/sing-box
+sb_cfg: /etc/sing-box/config.json
+sb_nodes: /etc/sing-box/nodes.json
+sb_current: /etc/sing-box/current-node.json
+sb_unit: sing-box.service

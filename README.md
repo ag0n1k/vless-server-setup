@@ -1,24 +1,167 @@
 # vless-server-setup
 
-Here is simple server setup via scripts to setup OpenVPN server that routes all vpn traffic through VLESS proxy.
+VPN-шлюз: OpenVPN + WireGuard клиенты заходят на VPS, исходящий трафик
+заворачивается через `sing-box` (TPROXY) на внешний прокси (VLESS/Reality
+или Shadowsocks из коммерческой подписки). Идея — у пользователя обычный
+VPN-клиент, выход в интернет — через прокси с маскировкой.
 
-1. Setup server
-2. Run vpn.sh
-3. Run fail2bash.sh
-4. Run vless.sh
-5. Run trpoxy.sh
+```
+[OVPN-клиенты] ──tun0──┐
+                       ├──> nftables (TPROXY :7895) ──> sing-box ──> внешний proxy
+[WG-клиенты]   ──wg0──┘
+```
 
-After, you also need to restart fail2ban:
+Стенд управляется через **Ansible**. Боевой хост: `194.87.99.207` (RuVDS,
+Ubuntu 24.04). См. `docs/wdtt-analysis.md` — отдельный анализ родственного
+проекта WDTT (proxy через VK-инфру).
+
+---
+
+## Быстрый старт
+
+### Требования (локально)
+
+- `ansible-core ≥ 2.14` (`pip install ansible-core` или `brew install ansible`)
+- `ansible-vault` (идёт с ansible-core)
+- SSH-доступ root к VPS (ключ в `~/.ssh/`)
+
+### Первый запуск
+
 ```bash
-nft delete table inet f2b-table 2>/dev/null || true
-systemctl restart fail2ban
+# 1. Сделать vault.yml из шаблона и заполнить subscription URL
+cp ansible/group_vars/all/vault.yml.example ansible/group_vars/all/vault.yml
+$EDITOR ansible/group_vars/all/vault.yml
+
+# 2. Зашифровать (создаст пароль и сохранит в .vault_pass)
+echo 'мой-пароль-vault' > .vault_pass
+chmod 600 .vault_pass
+ansible-vault encrypt ansible/group_vars/all/vault.yml --vault-password-file=.vault_pass
+
+# 3. Проверить синтаксис
+make check
+
+# 4. Dry-run: что Ansible собирается изменить
+make plan
+
+# 5. Применить
+make apply
 ```
 
-## Usefull commands
+`make plan` важен: на хост уже накатано (вручную) много правил —
+Ansible не пересоздаёт PKI, не перегенерирует WG-ключи, не трогает
+существующие сертификаты. Но он **подровняет**: server.conf, CCD-файлы,
+nftables-таблицы (схлопнет дубли в одну `vpn_tproxy`), fail2ban jails,
+sing-box config.json.
+
+---
+
+## Команды
+
+| Команда | Что делает |
+|---|---|
+| `make check` | синтаксическая проверка playbooks |
+| `make plan` | dry-run `site.yml` с diff'ом изменений |
+| `make apply` | применить `site.yml` |
+| `make status` | снимок состояния сервисов и текущей ноды (read-only) |
+| `make refresh-nodes` | обновить `/etc/sing-box/nodes.json` из подписки |
+| `make switch INDEX=2` | переключить sing-box на ноду #2 |
+| `make switch NEXT=1` | следующая нода по кругу |
+| `make switch NAME=Geneva` | по подстроке label |
+
+Добавить клиента OVPN/WG:
+
+```bash
+# OVPN
+ansible-playbook ansible/playbooks/add-ovpn-client.yml -e cn=newuser
+# OVPN с iroute (site-to-site)
+ansible-playbook ansible/playbooks/add-ovpn-client.yml \
+  -e cn=router3 -e fixed_ip=10.88.0.20 -e iroute=192.168.3.0/24
+
+# WG (ключи генерируются локально, на сервере остаётся только pubkey)
+ansible-playbook ansible/playbooks/add-wg-peer.yml -e name=phone -e wg_ip=10.188.0.10
+```
+
+После добавления WG-пира playbook выводит pubkey и PSK — добавь их
+в `ansible/state/wg_peers.yml` и `ansible/group_vars/all/vault.yml`,
+закоммить, прогони `make apply`.
+
+---
+
+## Структура
 
 ```
-systemctl status sing-box.service
-
-fail2ban-client  status openvpn-server
-fail2ban-client  status sshd
+ansible/
+├── inventory/hosts.yml         — один хост vpn1
+├── group_vars/all/
+│   ├── vars.yml                — открытые параметры (порты, подсети)
+│   ├── vault.yml               — секреты (gitignore'd)
+│   └── vault.yml.example       — шаблон
+├── host_vars/vpn1/vars.yml     — параметры хоста (public ip, WAN iface)
+├── state/
+│   ├── ovpn_peers.yml          — список OVPN-клиентов и CCD
+│   └── wg_peers.yml            — публичные ключи и AllowedIPs WG-пиров
+├── playbooks/
+│   ├── site.yml                — основной playbook
+│   ├── status.yml              — read-only проверка
+│   ├── refresh-nodes.yml       — обновить nodes.json
+│   ├── switch-node.yml         — переключить ноду
+│   ├── add-ovpn-client.yml     — выпустить OVPN-серт
+│   └── add-wg-peer.yml         — выпустить WG-ключи
+└── roles/
+    ├── common/                 — apt, sysctl, базовый nftables include
+    ├── fail2ban/               — sshd + openvpn jails
+    ├── openvpn/                — PKI bootstrap (idempotent), server.conf, CCD, NAT
+    ├── wireguard/              — wg0.conf из state/wg_peers.yml, NAT
+    ├── singbox/                — config.json из current node, парсер подписки
+    └── tproxy/                 — единая nft-таблица для tun0+wg0, leak-guard
 ```
+
+Старые shell-скрипты — в `legacy/` (как документация прежней схемы).
+
+---
+
+## Гарантии идемпотентности и сохранности
+
+Чтобы не сломать живой хост (там 7 OVPN-клиентов и 2 WG-пира с
+суммарным трафиком ~70 ГБ/день):
+
+- **PKI** — `easyrsa init-pki` запускается только если `pki/ca.crt` отсутствует.
+  Существующие клиентские ключи никогда не трогаются.
+- **WG server priv key** — `wg genkey` запускается только если `server.key`
+  отсутствует. Если pubkey в `host_vars` не совпадает с реальным — playbook
+  предупреждает (но не перезаписывает).
+- **sing-box config** — если `config.json` есть, он только патчится через
+  `jq` (добавляются недостающие inbound/route-правила). Полная регенерация
+  только при отсутствии файла.
+- **`force: false`** на копировании ключей PKI.
+- **TPROXY** — старые таблицы `vpnclients_tproxy`/`vpnclients_guard`/`wg_tproxy`
+  удаляются и заменяются на единую `vpn_tproxy` + `vpn_guard`.
+  Дубль `ip rule fwmark` чистится перед добавлением одного правила.
+
+`make plan` показывает diff — всегда проверять перед `make apply`.
+
+---
+
+## Диагностика
+
+```bash
+# на стороне VPS
+systemctl status openvpn-server@server sing-box wg-quick@wg0 fail2ban
+ip rule | grep fwmark
+nft list ruleset
+fail2ban-client status sshd
+
+# проверка прокси работает
+curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org
+# должен показать IP текущей ноды (ch-3-tun.vpnd.io и т.п.), а не 194.87.99.207
+```
+
+---
+
+## Что НЕ управляется через Ansible
+
+- `vpsguard.service` — агент хостера RuVDS (`/usr/bin/vpsguard`).
+  Не трогаем.
+- Телеграм-бот для генерации одноразовых паролей — отсутствует
+  (был в WDTT-проекте, тут не используется).
+- Бэкапы PKI — в roadmap.

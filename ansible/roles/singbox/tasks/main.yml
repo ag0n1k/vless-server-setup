@@ -1,0 +1,296 @@
+---
+- name: Установить sing-box (apt-репо SagerNet) и зависимости парсера
+  ansible.builtin.apt:
+    name:
+      - sing-box
+      - python3
+      - jq
+      - curl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  ignore_errors: true
+  register: apt_singbox
+
+- name: Fallback — выкачать sing-box бинарь, если apt-пакета нет
+  when: apt_singbox is failed
+  block:
+    - name: Узнать архитектуру
+      ansible.builtin.set_fact:
+        _sb_arch: "{{ 'amd64' if ansible_architecture in ['x86_64','amd64'] else 'arm64' }}"
+    - name: Получить latest tag sing-box
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/SagerNet/sing-box/releases/latest
+        return_content: true
+      register: _sb_release
+    - name: Найти tar.gz asset
+      ansible.builtin.set_fact:
+        _sb_asset: "{{ _sb_release.json.assets | selectattr('name','match','sing-box-.*-linux-' ~ _sb_arch ~ '\\.tar\\.gz$') | map(attribute='browser_download_url') | first }}"
+    - name: Скачать и распаковать
+      ansible.builtin.unarchive:
+        src: "{{ _sb_asset }}"
+        dest: /tmp/
+        remote_src: true
+    - name: Установить бинарь
+      ansible.builtin.shell: install -m 0755 $(find /tmp -type f -name sing-box -executable | head -n1) /usr/local/bin/sing-box
+      args:
+        creates: /usr/local/bin/sing-box
+
+- name: Каталог конфига sing-box
+  ansible.builtin.file:
+    path: "{{ sb_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Положить генератор конфига (Python helper)
+  ansible.builtin.copy:
+    dest: /usr/local/lib/sb_config_gen.py
+    mode: "0755"
+    content: |
+      #!/usr/bin/env python3
+      """Generate sing-box config.json from a node entry. Used by switch-node."""
+      import sys, json, pathlib
+
+      node = json.loads(sys.argv[1])
+      cfg_path = pathlib.Path(sys.argv[2])
+      socks_port = int(sys.argv[3])
+      tproxy_port = int(sys.argv[4])
+      log_level = sys.argv[5]
+
+      ntype = node["type"]
+      if ntype == "vless":
+          ob = {
+              "type": "vless", "tag": "proxy",
+              "server": node["server"], "server_port": node["port"],
+              "uuid": node["uuid"], "packet_encoding": "xudp",
+          }
+          if node.get("flow"): ob["flow"] = node["flow"]
+          sec = node.get("security", "")
+          if sec in ("tls", "reality"):
+              valid_fps = {"chrome","firefox","safari","ios","android","edge","360","qq","random","randomized"}
+              fp = (node.get("fp") or "randomized").lower()
+              if fp not in valid_fps: fp = "randomized"
+              tls = {"enabled": True, "server_name": node.get("sni") or node["server"], "utls": {"enabled": True, "fingerprint": fp}}
+              if node.get("alpn"): tls["alpn"] = [a.strip() for a in node["alpn"].split(",") if a.strip()]
+              if sec == "reality":
+                  tls["reality"] = {"enabled": True, "public_key": node["pbk"], "short_id": node["sid"]}
+              ob["tls"] = tls
+          tt = node.get("transport", "tcp")
+          if tt == "ws":
+              t = {"type": "ws"}
+              if node.get("path"): t["path"] = node["path"]
+              if node.get("host_hdr"): t["headers"] = {"Host": node["host_hdr"]}
+              ob["transport"] = t
+          elif tt == "grpc":
+              ob["transport"] = {"type": "grpc", "service_name": node.get("service_name","")}
+          elif tt == "http":
+              t = {"type": "http"}
+              if node.get("path"): t["path"] = node["path"]
+              if node.get("host_hdr"): t["host"] = [node["host_hdr"]]
+              ob["transport"] = t
+      elif ntype == "shadowsocks":
+          ob = {
+              "type": "shadowsocks", "tag": "proxy",
+              "server": node["server"], "server_port": node["port"],
+              "method": node["method"], "password": node["password"],
+              "packet_encoding": "xudp",
+          }
+          if node.get("plugin"): ob["plugin"] = node["plugin"]
+          if node.get("plugin_opts"): ob["plugin_opts"] = node["plugin_opts"]
+      else:
+          raise SystemExit(f"Unsupported node type: {ntype}")
+
+      cfg = {
+          "log": {"level": log_level},
+          "inbounds": [
+              {"type": "tproxy", "tag": "tproxy-in", "listen": "0.0.0.0", "listen_port": tproxy_port},
+              {"type": "socks",  "tag": "socks-in",  "listen": "127.0.0.1", "listen_port": socks_port}
+          ],
+          "outbounds": [ob, {"type":"direct","tag":"direct"}, {"type":"block","tag":"block"}],
+          "route": {
+              "final": "proxy",
+              "rules": [
+                  {"ip_cidr": ["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"], "outbound": "direct"},
+                  {"inbound": ["tproxy-in"], "outbound": "proxy"}
+              ]
+          }
+      }
+      cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+
+- name: Положить парсер подписки (Python helper)
+  ansible.builtin.copy:
+    dest: /usr/local/lib/sb_parse_subs.py
+    mode: "0755"
+    content: |
+      #!/usr/bin/env python3
+      """Parse subscription URLs (plain or base64) into nodes.json with dedup."""
+      import sys, json, base64, urllib.request, datetime
+      from urllib.parse import urlsplit, parse_qs, unquote
+
+      def fetch(url):
+          req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+          with urllib.request.urlopen(req, timeout=15) as r:
+              return r.read().decode("utf-8", errors="replace")
+
+      def extract_links(raw):
+          import re
+          if re.match(r'^(vless|ss|trojan|vmess)://', raw.strip()):
+              return [l.strip() for l in raw.splitlines() if l.strip().startswith(("vless://","ss://"))]
+          try:
+              dec = base64.b64decode(raw.replace("\n","").replace("\r","").replace(" ",""))
+              dec = dec.decode("utf-8", errors="replace")
+              return [l.strip() for l in dec.splitlines() if l.strip().startswith(("vless://","ss://"))]
+          except Exception:
+              return []
+
+      def parse_one(uri):
+          u = urlsplit(uri)
+          q = lambda k, d="": parse_qs(u.query).get(k, [d])[0]
+          if u.scheme == "vless":
+              return {
+                  "type":"vless","label":unquote(u.fragment) if u.fragment else f"{u.hostname}:{u.port}",
+                  "server":u.hostname,"port":int(u.port),"uuid":u.username,
+                  "security":q("security"),"flow":q("flow"),"sni":q("sni"),"fp":q("fp") or "randomized",
+                  "pbk":q("pbk"),"sid":q("sid"),"transport":q("type","tcp"),"path":q("path"),
+                  "host_hdr":q("host"),"service_name":q("serviceName") or q("service_name"),
+                  "alpn":q("alpn"),"raw":uri,
+              }
+          if u.scheme == "ss":
+              host, port = u.hostname, u.port
+              if host:
+                  ui = u.username or ""
+                  try:
+                      pad = ui + "=" * (-len(ui) % 4)
+                      d = base64.urlsafe_b64decode(pad).decode()
+                      method, password = d.split(":", 1)
+                  except Exception:
+                      method, password = ui.split(":",1) if ":" in ui else ("","")
+                      password = unquote(password)
+              else:
+                  body = uri.split("ss://",1)[1].split("#")[0]
+                  pad = body + "=" * (-len(body) % 4)
+                  d = base64.urlsafe_b64decode(pad).decode()
+                  ui_part, hp = d.rsplit("@",1)
+                  method, password = ui_part.split(":",1)
+                  host, port = hp.rsplit(":",1); port=int(port)
+              q2 = parse_qs(u.query)
+              plug = q2.get("plugin",[""])[0]
+              plugin, plugin_opts = (plug.split(";",1)+[""])[:2] if plug else ("","")
+              return {
+                  "type":"shadowsocks","label":unquote(u.fragment) if u.fragment else f"{host}:{port}",
+                  "server":host,"port":int(port),"method":method,"password":password,
+                  "plugin":plugin,"plugin_opts":plugin_opts,"raw":uri,
+              }
+          return None
+
+      urls = sys.argv[1].split()
+      out_path = sys.argv[2]
+      links = []
+      for url in urls:
+          try:
+              raw = fetch(url)
+              links.extend(extract_links(raw))
+          except Exception as e:
+              print(f"  [!] failed {url}: {e}", file=sys.stderr)
+      seen = set(); nodes = []
+      for l in links:
+          n = parse_one(l)
+          if not n: continue
+          k = (n.get("server",""), n.get("port",0), n.get("uuid") or n.get("password") or "")
+          if k in seen: continue
+          seen.add(k); nodes.append(n)
+      out = {
+          "updated_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+          "count": len(nodes),
+          "nodes": nodes,
+      }
+      with open(out_path,"w",encoding="utf-8") as f:
+          json.dump(out, f, ensure_ascii=False, indent=2)
+      print(f"saved {len(nodes)} nodes")
+
+- name: systemd unit для sing-box
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/sing-box.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=sing-box
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/sing-box run -c {{ sb_cfg }}
+      Restart=on-failure
+      RestartSec=2
+      LimitNOFILE=1048576
+
+      [Install]
+      WantedBy=multi-user.target
+  notify:
+    - reload systemd
+    - restart sing-box
+
+- name: Проверить наличие nodes.json
+  ansible.builtin.stat:
+    path: "{{ sb_nodes }}"
+  register: _sb_nodes_stat
+
+- name: Первичная загрузка нод (только если nodes.json отсутствует)
+  ansible.builtin.command: >-
+    /usr/local/lib/sb_parse_subs.py "{{ vault_subscription_urls }}" "{{ sb_nodes }}"
+  when: not _sb_nodes_stat.stat.exists
+  no_log: true
+
+- name: Проверить наличие config.json
+  ansible.builtin.stat:
+    path: "{{ sb_cfg }}"
+  register: _sb_cfg_stat
+
+- name: Сгенерировать config.json из текущей ноды (если конфига нет)
+  when: not _sb_cfg_stat.stat.exists
+  block:
+    - name: Прочитать nodes.json
+      ansible.builtin.slurp:
+        src: "{{ sb_nodes }}"
+      register: _nodes_b64
+    - name: Взять ноду #0
+      ansible.builtin.set_fact:
+        _node0: "{{ (_nodes_b64.content | b64decode | from_json).nodes[0] | to_json }}"
+    - name: Сгенерировать config.json
+      ansible.builtin.command: >-
+        /usr/local/lib/sb_config_gen.py
+        '{{ _node0 }}' '{{ sb_cfg }}' {{ singbox_socks_port }} {{ singbox_tproxy_port }} {{ singbox_log_level }}
+
+- name: Обеспечить tproxy-inbound в существующем config.json
+  ansible.builtin.command: |
+    jq '.inbounds = (.inbounds // []) |
+        (if (.inbounds | map(.tag) | index("tproxy-in")) != null
+         then .
+         else .inbounds += [{"type":"tproxy","tag":"tproxy-in","listen":"0.0.0.0","listen_port":{{ singbox_tproxy_port }}}]
+         end) |
+        .route.rules = (.route.rules // []) |
+        (if (.route.rules | map(.outbound) | index("proxy")) != null
+         then .
+         else .route.rules += [{"inbound":["tproxy-in"],"outbound":"proxy"}]
+         end)' {{ sb_cfg }}
+  args:
+    executable: /bin/bash
+  register: _patched_cfg
+  changed_when: false
+
+- name: Применить tproxy-патч (idempotent)
+  ansible.builtin.copy:
+    dest: "{{ sb_cfg }}"
+    content: "{{ _patched_cfg.stdout }}"
+    mode: "0600"
+    backup: true
+  when: _patched_cfg.stdout | length > 0
+  notify: restart sing-box
+
+- name: Включить и запустить sing-box
+  ansible.builtin.systemd:
+    name: "{{ sb_unit }}"
+    enabled: true
+    state: started
+    daemon_reload: true

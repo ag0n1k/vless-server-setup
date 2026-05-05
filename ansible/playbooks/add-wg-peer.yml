@@ -1,0 +1,78 @@
+---
+# Сгенерировать новый WG-пир: ключи на стороне клиента — локально, на сервер
+# уехала только публичная часть. Возвращает client.conf для скачивания.
+#
+# Вызов:
+#   ansible-playbook add-wg-peer.yml -e name=phone -e wg_ip=10.188.0.10
+#   ansible-playbook add-wg-peer.yml -e name=site3 -e wg_ip=10.188.0.20 -e site_lan=192.168.3.0/24
+
+- name: Add WireGuard peer
+  hosts: localhost
+  gather_facts: false
+  vars:
+    name: ""
+    wg_ip: ""
+    site_lan: ""
+    out_dir: "{{ playbook_dir }}/../../.local-peers"
+
+  tasks:
+    - name: Валидация
+      ansible.builtin.assert:
+        that:
+          - name | length > 0
+          - wg_ip | length > 0
+        fail_msg: "Нужны -e name=<name> -e wg_ip=<ip>"
+
+    - name: Каталог для ключей
+      ansible.builtin.file: { path: "{{ out_dir }}", state: directory, mode: "0700" }
+
+    - name: Сгенерировать ключи и PSK
+      ansible.builtin.shell: |
+        set -e
+        umask 077
+        wg genkey | tee {{ out_dir }}/{{ name }}.key | wg pubkey > {{ out_dir }}/{{ name }}.key.pub
+        wg genpsk > {{ out_dir }}/{{ name }}.psk
+      args:
+        creates: "{{ out_dir }}/{{ name }}.key"
+
+    - name: Прочитать сгенерированное
+      ansible.builtin.slurp: { src: "{{ item }}" }
+      register: _peer_slurped
+      loop:
+        - "{{ out_dir }}/{{ name }}.key"
+        - "{{ out_dir }}/{{ name }}.key.pub"
+        - "{{ out_dir }}/{{ name }}.psk"
+      no_log: true
+
+    - ansible.builtin.set_fact:
+        peer_priv: "{{ _peer_slurped.results[0].content | b64decode | trim }}"
+        peer_pub:  "{{ _peer_slurped.results[1].content | b64decode | trim }}"
+        peer_psk:  "{{ _peer_slurped.results[2].content | b64decode | trim }}"
+      no_log: true
+
+    - name: Подсказка по next steps
+      ansible.builtin.debug:
+        msg:
+          - "Pubkey пира (для state/wg_peers.yml): {{ peer_pub }}"
+          - "PSK (для group_vars/all/vault.yml: vault_wg_peer_psks[\"{{ peer_pub }}\"]): {{ peer_psk }}"
+          - "После добавления в state — запусти: make apply"
+          - "Клиентский .conf: {{ out_dir }}/{{ name }}.conf (создаётся следующей задачей)"
+
+    - name: Сохранить клиентский .conf
+      ansible.builtin.copy:
+        dest: "{{ out_dir }}/{{ name }}.conf"
+        mode: "0600"
+        content: |
+          [Interface]
+          PrivateKey = {{ peer_priv }}
+          Address    = {{ wg_ip }}/32
+          DNS        = 1.1.1.1
+
+          [Peer]
+          PublicKey    = {{ hostvars['vpn1'].wg_server_pubkey }}
+          PresharedKey = {{ peer_psk }}
+          Endpoint     = {{ hostvars['vpn1'].ansible_host }}:51820
+          AllowedIPs   = 10.188.0.0/24{% if site_lan | length > 0 %}, {{ site_lan }}{% endif %}
+
+          PersistentKeepalive = 25
+      no_log: true

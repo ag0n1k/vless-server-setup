@@ -1,0 +1,44 @@
+---
+- name: Read-only status snapshot
+  hosts: vpn1
+  become: true
+  gather_facts: true
+  tags: [facts, status]
+
+  tasks:
+    - name: Сервисы
+      ansible.builtin.command: systemctl is-active {{ item }}
+      loop:
+        - openvpn-server@server.service
+        - wg-quick@wg0.service
+        - sing-box.service
+        - fail2ban.service
+      register: svc
+      changed_when: false
+      failed_when: false
+
+    - name: Активные OVPN-клиенты
+      ansible.builtin.command: cat /var/log/openvpn/status.log
+      register: ovpn_status
+      changed_when: false
+      failed_when: false
+
+    - name: Текущая нода sing-box
+      ansible.builtin.slurp:
+        src: /etc/sing-box/current-node.json
+      register: current_node_b64
+      failed_when: false
+
+    - name: WireGuard handshake
+      ansible.builtin.command: wg show wg0
+      register: wg_state
+      changed_when: false
+      failed_when: false
+
+    - name: Сводка
+      ansible.builtin.debug:
+        msg:
+          services: "{{ dict(svc.results | map(attribute='item') | zip(svc.results | map(attribute='stdout'))) }}"
+          current_node: "{{ (current_node_b64.content | b64decode | from_json) if current_node_b64.content is defined else 'n/a' }}"
+          wg: "{{ wg_state.stdout_lines | default([]) }}"
+          ovpn_clients: "{{ ovpn_status.stdout_lines | default([]) | select('match', '^CLIENT_LIST,') | list }}"

@@ -1,0 +1,14 @@
+# Клиентский WG-конфиг — генерируется playbook'ом add-wg-peer.
+[Interface]
+PrivateKey = {{ peer_priv }}
+Address    = {{ peer_address }}
+{% if peer_dns is defined %}
+DNS        = {{ peer_dns }}
+{% endif %}
+
+[Peer]
+PublicKey    = {{ wg_server_pub_actual }}
+PresharedKey = {{ peer_psk }}
+Endpoint     = {{ server_public_ip }}:{{ wg_port }}
+AllowedIPs   = {{ peer_allowed_ips | default('0.0.0.0/0') }}
+PersistentKeepalive = {{ peer_keepalive | default(25) }}

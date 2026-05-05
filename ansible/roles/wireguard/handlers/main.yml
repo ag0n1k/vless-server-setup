@@ -1,0 +1,8 @@
+---
+# Hot-reload без drop сессий: wg syncconf <(wg-quick strip wg0).
+- name: reload wg0
+  ansible.builtin.shell: |
+    set -e
+    wg syncconf {{ wg_interface }} <(wg-quick strip {{ wg_interface }})
+  args:
+    executable: /bin/bash
