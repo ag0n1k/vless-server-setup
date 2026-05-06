@@ -90,6 +90,14 @@
     enabled: true
     state: started
 
+- name: rp_filter=0 на {{ wdtt_wg_iface }} (после поднятия — нужен для TPROXY)
+  ansible.posix.sysctl:
+    name: "net.ipv4.conf.{{ wdtt_wg_iface }}.rp_filter"
+    value: "0"
+    sysctl_file: /etc/sysctl.d/99-vpn-gateway.conf
+    state: present
+    reload: true
+
 # ── vk-turn-proxy сервер ─────────────────────────────────────────────
 - name: Залить vk-turn-proxy из локально скачанного бинаря
   when: wdtt_server_local_path | length > 0 and wdtt_server_local_path is exists

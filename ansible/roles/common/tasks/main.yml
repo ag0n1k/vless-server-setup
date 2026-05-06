@@ -33,7 +33,12 @@
     state: present
     reload: true
   loop: "{{ ([wan_iface] + tproxy_capture_ifaces) | unique }}"
-  when: item | length > 0
+  when:
+    - item | length > 0
+    # sysctl требует чтобы /proc/sys/.../{{ iface }} существовал — пропускаем
+    # интерфейсы, которые ещё не подняты (например wg1 до роли wdtt).
+    # Каждая роль, поднимающая свой интерфейс, ставит rp_filter сама.
+    - item in ansible_facts['interfaces']
 
 - name: Включить системную nftables-службу
   ansible.builtin.systemd:
