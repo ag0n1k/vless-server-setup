@@ -4,8 +4,8 @@
 # Ansible
 *.retry
 .vault_pass
-ansible/group_vars/all/vault.yml
-ansible/host_vars/*/vault.yml
+ansible/inventory/group_vars/all/vault.yml
+ansible/inventory/host_vars/*/vault.yml
 ansible/.cache/
 ansible/facts/
 

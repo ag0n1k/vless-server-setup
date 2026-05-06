@@ -101,11 +101,11 @@ PKI, WG-ключи остаются. Поменяется лишь:
    ```
 2. **Vault:**
    ```bash
-   cp ansible/group_vars/all/vault.yml.example ansible/group_vars/all/vault.yml
-   $EDITOR ansible/group_vars/all/vault.yml   # vault_subscription_urls
+   cp ansible/inventory/group_vars/all/vault.yml.example ansible/inventory/group_vars/all/vault.yml
+   $EDITOR ansible/inventory/group_vars/all/vault.yml   # vault_subscription_urls
                                               # vault_wdtt_peer_psks (опц.)
    echo 'vault-pass' > .vault_pass && chmod 600 .vault_pass
-   ansible-vault encrypt ansible/group_vars/all/vault.yml --vault-password-file=.vault_pass
+   ansible-vault encrypt ansible/inventory/group_vars/all/vault.yml --vault-password-file=.vault_pass
    ```
 3. **Открыть UDP 56000 в RuVDS firewall.** Внутренний 51821 закрыт
    nftables-DROP'ом, наружу не светится.
@@ -156,7 +156,7 @@ PKI, WG-ключи остаются. Поменяется лишь:
   - `ansible/state/ovpn_peers.yml` — 7 текущих CN с CCD-настройками для
     `hopper`/`giga`
   - `ansible/state/wg_peers.yml` — 2 пира с pubkeys и AllowedIPs
-- `ansible/group_vars/all/vault.yml.example` — шаблон для секретов
+- `ansible/inventory/group_vars/all/vault.yml.example` — шаблон для секретов
 - `Makefile`, `ansible.cfg`, `.gitignore`, `.editorconfig`
 - `README.md` переписан под Ansible-flow
 - `docs/MIGRATION.md` — что произойдёт при первом `make apply` поверх
@@ -169,7 +169,7 @@ YAML-валидность всех 30 ansible-файлов проверена л
 
 ## Что НЕ сделано (по убыванию приоритета)
 
-1. **Vault-инициализация.** Файл `ansible/group_vars/all/vault.yml` ещё
+1. **Vault-инициализация.** Файл `ansible/inventory/group_vars/all/vault.yml` ещё
    не создан и не зашифрован. Без него `make plan` упадёт на
    `vault_subscription_urls is undefined`. Заготовка действий — в
    `README.md → Быстрый старт → Первый запуск` (шаги 1–3).
@@ -239,7 +239,7 @@ YAML-валидность всех 30 ansible-файлов проверена л
   правила вручную после fail2ban-стопа, чтобы не было ничего
   лишнего слетающего по `vpn_guard.input`.
 - **`vault.yml` в `.gitignore`.** Если случайно сделаешь `git add -f
-  ansible/group_vars/all/vault.yml` — закоммитишь зашифрованное (что
+  ansible/inventory/group_vars/all/vault.yml` — закоммитишь зашифрованное (что
   ОК), но привычка нехорошая.
 
 ## Команды для возобновления
@@ -254,10 +254,10 @@ pip install --user ansible-core
 # или brew install ansible
 
 # Заполнить vault и зашифровать
-cp ansible/group_vars/all/vault.yml.example ansible/group_vars/all/vault.yml
-$EDITOR ansible/group_vars/all/vault.yml
+cp ansible/inventory/group_vars/all/vault.yml.example ansible/inventory/group_vars/all/vault.yml
+$EDITOR ansible/inventory/group_vars/all/vault.yml
 echo 'pick-a-strong-password' > .vault_pass && chmod 600 .vault_pass
-ansible-vault encrypt ansible/group_vars/all/vault.yml --vault-password-file=.vault_pass
+ansible-vault encrypt ansible/inventory/group_vars/all/vault.yml --vault-password-file=.vault_pass
 
 # Бэкап перед чем-либо
 ssh root@194.87.99.207 'tar czf /root/vpn-backup-$(date +%F).tgz /etc/openvpn /etc/wireguard /etc/sing-box /etc/fail2ban'

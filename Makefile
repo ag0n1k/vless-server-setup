@@ -48,7 +48,7 @@ lint:
 	@command -v ansible-lint >/dev/null && ansible-lint ansible/playbooks/site.yml || echo "ansible-lint not installed"
 
 vault-edit:
-	@ansible-vault edit ansible/group_vars/all/vault.yml $(if $(VAULT_PASS),--vault-password-file=$(VAULT_PASS))
+	@ansible-vault edit ansible/inventory/group_vars/all/vault.yml $(if $(VAULT_PASS),--vault-password-file=$(VAULT_PASS))
 
 facts:
 	@$(ANSIBLE) ansible/playbooks/status.yml --tags facts $(ANSIBLE_FLAGS)

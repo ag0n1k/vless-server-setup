@@ -142,8 +142,8 @@ ssh root@194.87.99.207 \
 ssh root@194.87.99.207 'grep -oE "https://vpnd.io[^ \"]+" /root/.bash_history | head -1'
 
 # 2.3. Создать и заполнить vault
-cp ansible/group_vars/all/vault.yml.example ansible/group_vars/all/vault.yml
-$EDITOR ansible/group_vars/all/vault.yml
+cp ansible/inventory/group_vars/all/vault.yml.example ansible/inventory/group_vars/all/vault.yml
+$EDITOR ansible/inventory/group_vars/all/vault.yml
 ```
 
 Минимум для первого apply:
@@ -164,7 +164,7 @@ vault_wdtt_peer_psks: {}
 # 2.4. Зашифровать
 echo 'твой-долгий-vault-пароль' > .vault_pass
 chmod 600 .vault_pass
-ansible-vault encrypt ansible/group_vars/all/vault.yml --vault-password-file=.vault_pass
+ansible-vault encrypt ansible/inventory/group_vars/all/vault.yml --vault-password-file=.vault_pass
 ```
 
 > **Что бывает если забыть PSK для wg0:** pre-flight assertion в

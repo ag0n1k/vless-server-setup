@@ -102,7 +102,7 @@
           'awk "/^\\[Peer\\]/{pub=psk=\"\"} /^PublicKey/{pub=\$3} /^PresharedKey/{print pub,\$3}" \
             /etc/wireguard/wg0.conf'
 
-      Положи в ansible/group_vars/all/vault.yml:
+      Положи в ansible/inventory/group_vars/all/vault.yml:
         vault_wg_peer_psks:
           "<pubkey1>": "<psk1>"
           "<pubkey2>": "<psk2>"

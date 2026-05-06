@@ -35,8 +35,8 @@ make build-wdtt
 .local/vk-turn-proxy -h    # должно показать -listen и -connect флаги
 
 # 2. Сделать vault.yml из шаблона
-cp ansible/group_vars/all/vault.yml.example ansible/group_vars/all/vault.yml
-$EDITOR ansible/group_vars/all/vault.yml
+cp ansible/inventory/group_vars/all/vault.yml.example ansible/inventory/group_vars/all/vault.yml
+$EDITOR ansible/inventory/group_vars/all/vault.yml
 # Заполнить:
 #   vault_subscription_urls   — URL подписки vpnd.io
 #   vault_wdtt_peer_psks      — (опционально) PSK для WDTT-пиров
@@ -44,7 +44,7 @@ $EDITOR ansible/group_vars/all/vault.yml
 # 3. Зашифровать
 echo 'мой-пароль-vault' > .vault_pass
 chmod 600 .vault_pass
-ansible-vault encrypt ansible/group_vars/all/vault.yml --vault-password-file=.vault_pass
+ansible-vault encrypt ansible/inventory/group_vars/all/vault.yml --vault-password-file=.vault_pass
 
 # 4. Открыть в панели RuVDS firewall: UDP 56000 на вход
 
@@ -91,7 +91,7 @@ ansible-playbook ansible/playbooks/add-wg-peer.yml -e name=phone -e wg_ip=10.188
 ```
 
 После добавления WG-пира playbook выводит pubkey и PSK — добавь их
-в `ansible/state/wg_peers.yml` и `ansible/group_vars/all/vault.yml`,
+в `ansible/state/wg_peers.yml` и `ansible/inventory/group_vars/all/vault.yml`,
 закоммить, прогони `make apply`.
 
 ---
