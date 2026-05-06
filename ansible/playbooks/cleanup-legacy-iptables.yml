@@ -1,0 +1,70 @@
+---
+# ──────────────────────────────────────────────────────────────────────
+# Одноразовая чистка legacy iptables-правил, оставшихся от прежнего
+# /etc/wireguard/wg0.conf:
+#
+#   PostUp = iptables -A FORWARD -i %i -j ACCEPT;
+#            iptables -A FORWARD -o %i -j ACCEPT;
+#            iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+#
+# После apply шаблон wg0.conf без PostUp/PostDown, но `wg syncconf`
+# (наш handler) не вызывает PostDown — поэтому правила висят в
+# iptables-legacy compat shim рядом с nftables-правилами nft wg_nat
+# (двойной MASQUERADE, идемпотентно, но грязно).
+#
+# Этот playbook чистит их **не трогая** WG-сессии (без wg-quick down).
+# Запускать ОДИН раз после первого `make apply`.
+# ──────────────────────────────────────────────────────────────────────
+
+- name: Cleanup legacy iptables rules left over from old wg0.conf PostUp
+  hosts: vpn1
+  become: true
+  gather_facts: false
+  vars:
+    wan_iface: eth0
+
+  tasks:
+    - name: Снимок legacy iptables -t nat
+      ansible.builtin.command: iptables -t nat -S POSTROUTING
+      register: nat_before
+      changed_when: false
+
+    - name: Снимок legacy iptables FORWARD
+      ansible.builtin.command: iptables -S FORWARD
+      register: fwd_before
+      changed_when: false
+
+    - name: Удалить MASQUERADE-правило старого wg0 PostUp
+      ansible.builtin.command:
+        cmd: "iptables -t nat -D POSTROUTING -o {{ wan_iface }} -j MASQUERADE"
+      register: del_nat
+      failed_when: false
+      changed_when: del_nat.rc == 0
+
+    - name: Удалить FORWARD-правила старого wg0 PostUp (in)
+      ansible.builtin.command:
+        cmd: "iptables -D FORWARD -i wg0 -j ACCEPT"
+      register: del_fwd_in
+      failed_when: false
+      changed_when: del_fwd_in.rc == 0
+
+    - name: Удалить FORWARD-правила старого wg0 PostUp (out)
+      ansible.builtin.command:
+        cmd: "iptables -D FORWARD -o wg0 -j ACCEPT"
+      register: del_fwd_out
+      failed_when: false
+      changed_when: del_fwd_out.rc == 0
+
+    - name: Снимок после
+      ansible.builtin.command: iptables -t nat -S POSTROUTING
+      register: nat_after
+      changed_when: false
+
+    - name: Сводка
+      ansible.builtin.debug:
+        msg:
+          - "── before ──"
+          - "{{ nat_before.stdout_lines }}"
+          - "── after ──"
+          - "{{ nat_after.stdout_lines }}"
+          - "Удалено: NAT={{ del_nat.changed }}, FWD-in={{ del_fwd_in.changed }}, FWD-out={{ del_fwd_out.changed }}"

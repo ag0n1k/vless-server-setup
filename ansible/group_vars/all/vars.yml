@@ -32,12 +32,12 @@ singbox_log_level: info
 
 # TPROXY ─────────────────────────────────────────────────────────────
 # Интерфейсы, чьи пакеты заворачиваются в sing-box (входящие).
-# tun0 — OVPN, wg0 — обычный WG, wdtt0 — WDTT-туннель через VK TURN.
+# tun0 — OVPN, wg0 — site-to-site WG, wg1 — WDTT-туннель через VK TURN.
 # Все три в одну nft-таблицу, без дублей.
 tproxy_capture_ifaces:
   - tun0
   - wg0
-  - wdtt0
+  - wg1
 tproxy_fwmark: 1
 tproxy_rt_table_id: 100
 tproxy_rt_table_name: tproxy

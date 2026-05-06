@@ -1,94 +1,250 @@
-# Миграция: shell-скрипты → Ansible
+# Миграция: shell-скрипты → Ansible (первый прогон)
 
-Документ для одного раза — при первом прогоне `make apply` поверх живого
-хоста `194.87.99.207`. Описывает что playbook сделает с существующим
-состоянием и что проверить **до** и **после**.
+Документ для **одного раза** — при приведении живого хоста
+`194.87.99.207` к мастер-ветке (`main`). Описывает что playbook сделает,
+что НЕ сделает, и команды по шагам.
 
-## Что точно не изменится
+> **Состояние сервера на момент анализа (2026-05-05):**
+> 7 OVPN-клиентов в PKI, 2 WG-пира (giga, hopper), sing-box на ноде
+> ch-3-tun.vpnd.io, ~70 ГБ/день через `giga`. Любая перетряска
+> рестартует сервисы → клиенты переподключатся.
 
-- PKI OpenVPN (`/etc/openvpn/easy-rsa/pki/`) — `easyrsa init-pki` не запустится,
-  потому что `creates: pki/private` сработает.
-- Серверные сертификаты `ca.crt`, `server.crt`, `server.key`, `ta.key` — копия
-  идёт с `force: false`, существующие останутся.
-- WireGuard `server.key` — генерация под `creates: /etc/wireguard/server.key`.
-- sing-box `nodes.json` — обновляется только если файла нет; если есть —
-  оставляем (для обновления — `make refresh-nodes`).
-- sing-box `current-node.json` — не трогаем (это runtime-state).
+---
 
-## Что изменится (ожидаемо)
+## Конфликтов с текущим OpenVPN/WG нет
+
+Проверка по слоям:
+
+| Слой | Сейчас | После apply | Конфликт? |
+|---|---|---|---|
+| Порты UDP | 1194 (OVPN), 51820 (wg0) | + 56000 (vk-turn-proxy), 51821 (wg1, only-localhost) | нет |
+| Подсети | 10.88/24, 10.188/24, 192.168.1/24, 192.168.2/24 | + 10.66.66/24 (wg1) | нет |
+| Интерфейсы | tun0, wg0 | + wg1 | нет (wg1 новый) |
+| OVPN-клиенты | 7 в PKI, hopper/giga имеют CCD | те же 7, CCD идентичный | нет |
+| WG-пиры на wg0 | giga, hopper | те же | нет |
+| sing-box | tproxy:7895, текущая нода ch-3-tun | тот же конфиг, патч idempotent | нет |
+| fail2ban | sshd+openvpn jails | идентично | нет |
+
+PKI и WG-приватные ключи **не пересоздаются**: в роли стоят `creates:`
+проверки, существующее не трогается.
+
+---
+
+## Что изменится (плановое)
+
+### nftables (главный кусок diff'а)
+
+Будут **удалены и пересозданы** таблицы (через `flush ruleset` в
+`/etc/nftables.conf`):
+
+- `vpnclients_tproxy`, `vpnclients_guard`, `wg_tproxy` — наследие от
+  `trpoxy.sh`. Заменяются единой `vpn_tproxy` + `vpn_guard`. Поведение
+  идентичное, без дублей.
+- `openvpn_extra`, `openvpn_c2c` — содержали `tun0→tun0 accept`
+  (client-to-client) и icmp accept. Функционал перенесён в `openvpn_filter`.
+- `openvpn_filter`, `openvpn_nat` — пересоздаются с тем же содержанием.
+- `wg_nat` — пересоздаётся.
+- **Новые**: `wdtt_input` (только если `enable_wdtt: true`).
+- `f2b-table` — flush'нется, пересоздастся fail2ban'ом при следующем
+  бане. Окно ~секунды без активного банлиста, не критично.
 
 ### `/etc/openvpn/server/server.conf`
-- В существующей версии стоит `dh /etc/openvpn/server/keys/dh.pem`.
-- Новая роль ставит `dh none` — потому что все cipher'ы ECDHE/AEAD,
-  DH не используется.
-- **Эффект**: после рестарта `openvpn-server@server` клиенты переподключатся.
-  Один цикл reconnect (~5 сек). Если кто-то на видеосозвоне — заметит.
-- Решение: запускать `make apply` в окно низкой активности.
 
-### nftables
-- Ансибл удалит таблицы `vpnclients_tproxy`, `vpnclients_guard`, `wg_tproxy`
-  и создаст единую `vpn_tproxy` + `vpn_guard`.
-- Эффект: TPROXY работает идентично, но без дублей. `iptables`-rules
-  из старого `wg0.conf PostUp` тоже исчезнут после ребута wg-quick.
-
-### `wg0.conf`
-- Текущий `wg0.conf` использует `iptables ... MASQUERADE` в PostUp/PostDown.
-- Новый шаблон `wg0.conf.j2` **без** PostUp/PostDown — NAT делается
-  через nftables-таблицу `wg_nat`.
-- Эффект: при `wg-quick reload` старые iptables-правила останутся в legacy
-  ip-tables compat shim'е, могут потребовать ручной чистки.
-  Альтернатива: `wg-quick down wg0 && wg-quick up wg0` (момент даунтайма
-  для пиров).
-
-### CCD
-- Существующие `/etc/openvpn/ccd/{hopper,giga}` идентичны тем, что генерит
-  шаблон → diff пустой.
-- Для пиров `IphoneOlga`, `IpadOlga`, `iphone`, `m5`, `client1` CCD не создаётся
-  (state.fixed_ip не задан).
-
-### fail2ban
-- Конфиги совпадают с текущим state — diff пустой.
-
-### sing-box
-- `config.json` будет пропатчен `jq`'ом так, чтобы tproxy-inbound и
-  правило `tproxy-in → proxy` присутствовали. Сейчас они УЖЕ есть → diff пустой.
-- Если в течение жизни хоста кто-то запускал `parse.sh` или `switch.sh` —
-  они переписывают `config.json` целиком, теряя tproxy-inbound. Новый
-  playbook `switch-node.yml` всегда сохраняет tproxy-inbound (см.
-  `roles/singbox/tasks/main.yml: jq`-патч после генерации).
-
-## Чек-лист перед `make apply`
-
-```bash
-# 1. убедиться что vault.yml зашифрован и пароль есть
-ls -la ansible/group_vars/all/vault.yml .vault_pass
-
-# 2. dry-run
-make plan 2>&1 | tee /tmp/plan.log
-
-# 3. посмотреть какие задачи будут "changed"
-grep -E '(changed|TASK|RUNNING)' /tmp/plan.log
-
-# 4. убедиться что openvpn-restart планируется только если server.conf реально меняется
-grep -A2 'openvpn-server' /tmp/plan.log
+```diff
+-dh /etc/openvpn/server/keys/dh.pem
++dh none
+-# mssfix 1360                       (закомментировано → удалится)
+-#route 192.168.1.0 ... 10.88.0.12   (закомментировано → удалится)
+-#route 192.168.2.0 ... 10.88.0.13   (закомментировано → удалится)
 ```
 
-## После `make apply`
+DH не нужен, потому что все cipher'ы ECDHE/AEAD. После рестарта
+`openvpn-server@server` клиенты переподключатся (~5 сек прерывания).
 
-```bash
-# проверить сервисы
-make status
+### `/etc/wireguard/wg0.conf`
 
-# проверить что трафик ходит через прокси
-ssh root@194.87.99.207 'curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org'
-# IP должен НЕ совпадать с 194.87.99.207
-
-# проверить количество ip rule для fwmark (должно быть ровно 1)
-ssh root@194.87.99.207 'ip rule | grep -c fwmark'
+```diff
+-PostUp   = iptables -A FORWARD -i %i -j ACCEPT; ... -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+-PostDown = iptables -D FORWARD -i %i -j ACCEPT; ... -t nat -D POSTROUTING -o eth0 -j MASQUERADE
 ```
 
-## Если что-то пошло не так
+PostUp/PostDown с iptables уходят — NAT теперь через nftables `wg_nat`.
 
-- Конфиги бэкапятся (`backup: true` в шаблонах) — рядом лежит `.YYYY-MM-DD@...~` файл.
-- Восстановление: `mv /etc/openvpn/server/server.conf.~* /etc/openvpn/server/server.conf && systemctl restart openvpn-server@server`.
-- nftables — `nft list ruleset > /tmp/before.nft` снять до прогона; восстановить через `nft -f /tmp/before.nft`.
+**ВАЖНО:** наш handler делает `wg syncconf`, а **НЕ** `wg-quick down/up`.
+`syncconf` обновляет peers без drop сессий, но **не вызывает PostDown** —
+старые iptables-правила MASQUERADE останутся болтаться в legacy-iptables-
+shim. Они дублируют nftables-правило (двойной masquerade — идемпотентно,
+но грязно).
+
+Чистится отдельным одноразовым playbook'ом после apply (см. шаги ниже).
+
+### `/etc/sing-box/config.json`
+
+Должен быть **identical**: текущий конфиг уже имеет `tproxy-in` и
+правило `inbound:[tproxy-in] outbound:proxy`. Наш `jq`-патч
+идемпотентно проверяет наличие, не дублирует. Diff = пустой.
+
+### Юниты systemd
+
+- `sing-box.service` — наш юнит в `/etc/systemd/system/` переопределит
+  пакетный из apt (`/lib/systemd/system/`). Содержание идентичное,
+  но systemd увидит изменение источника → `daemon-reload` + restart.
+  Активные TCP-сессии через прокси разорвутся. HTTPS retransmit, не
+  критично.
+- `vk-turn-proxy.service` — **новый** (если включён wdtt).
+- `wg-quick@wg1.service` — **новый** (если включён wdtt).
+
+---
+
+## Пошаговая инструкция
+
+### 0. Подготовка локально
+
+```bash
+cd /Users/ag0n1k/work/github/vless-server-setup
+git status                          # должно быть clean на ветке main
+git log --oneline -3
+# 32b2105 wdtt: переключиться на правильный апстрим cacggghp...
+# a5ac3e7 wdtt: включить роль по умолчанию...
+# ccd68a0 ansible: добавить опциональную роль wdtt...
+
+# Если ansible не установлен:
+brew install ansible        # macOS
+# pip install --user ansible-core
+```
+
+### 1. Скачать vk-turn-proxy бинарь
+
+```bash
+make build-wdtt
+# → .local/vk-turn-proxy ~6.8 МБ
+.local/vk-turn-proxy -h     # должно показать -listen и -connect
+```
+
+### 2. Vault
+
+```bash
+cp ansible/group_vars/all/vault.yml.example ansible/group_vars/all/vault.yml
+$EDITOR ansible/group_vars/all/vault.yml
+# Минимум:
+#   vault_subscription_urls: https://vpnd.io/subscription/ss/<токен>/?ru=1
+# (токен есть в bash_history vpn1 — посмотри:
+#  ssh root@194.87.99.207 'grep "vpnd.io" /root/.bash_history | head -3')
+
+echo 'твой-долгий-vault-пароль' > .vault_pass
+chmod 600 .vault_pass
+ansible-vault encrypt ansible/group_vars/all/vault.yml --vault-password-file=.vault_pass
+```
+
+### 3. Открыть UDP 56000 в RuVDS
+
+В панели хостера → Firewall/Security → разрешить вход на UDP 56000.
+**Это вручную, я автоматизировать не могу.**
+
+### 4. Бэкап
+
+```bash
+mkdir -p .local-backups
+ssh root@194.87.99.207 \
+  'tar czf /root/vpn-backup-$(date +%F-%H%M).tgz /etc/openvpn /etc/wireguard /etc/sing-box /etc/fail2ban /etc/nftables.conf /etc/nftables.d/'
+scp root@194.87.99.207:/root/vpn-backup-*.tgz .local-backups/
+```
+
+### 5. Dry-run
+
+```bash
+make check                  # синтаксис
+make plan 2>&1 | tee /tmp/ansible-plan.log
+```
+
+Прочитай `/tmp/ansible-plan.log`. Должно быть:
+- много `changed` в nftables (правила удалятся и пересоздадутся)
+- 1× `changed` в `/etc/openvpn/server/server.conf` (dh none)
+- 1× `changed` в `/etc/wireguard/wg0.conf` (без PostUp/PostDown)
+- 1× `created` для `/etc/wireguard/wg1.conf`
+- 1× `created` для `vk-turn-proxy.service`
+- остальное должно быть `ok` (idempotent)
+
+Если что-то выглядит подозрительно — **остановись**, спроси.
+
+### 6. Apply
+
+```bash
+make apply
+```
+
+Время: ~3-5 минут. В процессе:
+- OVPN-клиенты переподключаются 1 раз (рестарт `openvpn-server@server`)
+- WG-сессии **не рвутся** (через `wg syncconf`)
+- sing-box рестартанётся 1 раз (TCP-соединения разорвутся, переподключатся)
+- vk-turn-proxy и wg1 поднимутся первый раз
+
+### 7. Чистка legacy iptables
+
+```bash
+ansible-playbook ansible/playbooks/cleanup-legacy-iptables.yml \
+  --vault-password-file=.vault_pass
+```
+
+Удалит висящие `iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE`
+и `iptables -A FORWARD -[io] wg0 -j ACCEPT` от старого wg0 PostUp.
+Сессии WG не трогает.
+
+### 8. Проверки
+
+```bash
+make status        # сервисы должны быть active
+
+ssh root@194.87.99.207 '
+  echo "=== ip rule (должна быть ОДНА fwmark) ==="
+  ip rule | grep fwmark | wc -l
+  echo "=== nft tables ==="
+  nft list ruleset | grep "^table" | sort
+  echo "=== ovpn клиенты ==="
+  cat /var/log/openvpn/status.log | grep CLIENT_LIST
+  echo "=== wg ==="
+  wg show
+  echo "=== прокси работает? ==="
+  curl -sf --proxy socks5h://127.0.0.1:1080 https://api.ipify.org
+'
+```
+
+Ожидаемое:
+- `ip rule | wc -l` = 1 (раньше было 3)
+- nft tables: `vpn_tproxy`, `vpn_guard`, `openvpn_filter`, `openvpn_nat`,
+  `wg_nat`, `wdtt_input`, `f2b-table` (если успел fail2ban что-то записать)
+- ovpn клиенты: те же что и до apply (могут переподключиться с новыми
+  Connected Since)
+- wg show: peer'ы giga + hopper (handshake живой) и wg1 (peers пустой
+  пока нет WDTT-клиентов)
+- proxy IP: nodes.vpnd.io, **не** 194.87.99.207
+
+---
+
+## Откат
+
+Если что-то пошло не так:
+
+```bash
+# Восстановить конфиги из бэкапа
+scp .local-backups/vpn-backup-*.tgz root@194.87.99.207:/root/
+ssh root@194.87.99.207 '
+  cd /
+  tar xzf /root/vpn-backup-*.tgz
+  systemctl restart openvpn-server@server wg-quick@wg0 sing-box fail2ban
+  nft flush ruleset
+  nft -f /etc/nftables.conf
+'
+```
+
+Или git: `git checkout 1fb70db -- scripts/ scripts_v2/` и `bash trpoxy.sh`
+(но это шаг назад, и придётся вручную).
+
+---
+
+## После успеха — следующие шаги (для другого захода)
+
+1. WDTT-клиенты на iPhone/Mac — см. `docs/wdtt-clients.md`
+2. Создать отдельную VK-группу и активный звонок
+3. `make` `add-wdtt-peer` для каждого устройства
+4. Push в `origin` (но сначала убедиться что vault.yml не уехал в коммит)

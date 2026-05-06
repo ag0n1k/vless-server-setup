@@ -29,6 +29,37 @@ vpn1 (DTLS-эндпойнт 56000/udp + внутренний WG `wdtt0` 10.66.66
   AltStore или Apple Developer) и macOS (denny4-форк GUI или
   sicmundu-форк CLI)
 
+## Дополнение от 2026-05-06 (поздно): пошаговая инструкция готова
+
+Перед чтением этого раздела сначала прочитай **`docs/MIGRATION.md`** —
+там полный аудит конфликтов (нет), что изменится при apply, и
+пошаговая инструкция для приведения сервера к main.
+
+Кратко из MIGRATION.md, последовательность:
+
+1. `make build-wdtt` — скачать бинарь vk-turn-proxy
+2. Заполнить vault.yml + зашифровать
+3. Открыть UDP 56000 в панели RuVDS (вручную)
+4. `tar czf .../vpn-backup ...` — бэкап `/etc/openvpn /etc/wireguard
+   /etc/sing-box /etc/fail2ban /etc/nftables.*`
+5. `make plan` → читать diff
+6. `make apply`
+7. `ansible-playbook cleanup-legacy-iptables.yml` — одноразово, чистит
+   висящие iptables-MASQUERADE от старого wg0 PostUp
+8. `make status` + ручные проверки (ip rule fwmark = 1, nft tables,
+   wg show, proxy IP)
+
+**Конфликтов с текущими OVPN/WG нет** — порты, подсети, интерфейсы,
+PKI, WG-ключи остаются. Поменяется лишь:
+- `dh dh.pem` → `dh none` в server.conf (рестарт OVPN, ~5 сек)
+- nft-таблицы `vpnclients_*` + `wg_tproxy` → единая `vpn_tproxy`
+- `wg0.conf` без PostUp (legacy iptables чистится отдельным playbook'ом)
+- появятся новые: `wg1` (10.66.66.0/24), `vk-turn-proxy.service`,
+  `wdtt_input` nft-таблица
+
+Также поправлен баг: `tproxy_capture_ifaces` ссылался на `wdtt0`
+(имя из первой итерации), теперь правильно — `wg1`.
+
 ## Дополнение от 2026-05-06 (вечер): WDTT переписан под правильный апстрим
 
 Выяснилось что upstream WDTT-семейства — `cacggghp/vk-turn-proxy`
