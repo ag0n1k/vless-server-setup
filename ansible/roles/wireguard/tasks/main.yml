@@ -18,6 +18,7 @@
     wg pubkey < {{ wg_server_priv_path }} > {{ wg_server_pub_path }}
   args:
     creates: "{{ wg_server_priv_path }}"
+  check_mode: false
 
 - name: Прочитать server priv key
   ansible.builtin.slurp:
@@ -73,6 +74,9 @@
   changed_when: false
   no_log: true
   failed_when: false
+  # read-only сверка — должна работать и в check-mode, иначе pre-flight
+  # скипается и защита PSK не срабатывает в `make plan`.
+  check_mode: false
 
 - name: Распарсить pubkey→psk из текущего конфига
   ansible.builtin.set_fact:

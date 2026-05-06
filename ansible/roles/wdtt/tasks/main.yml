@@ -45,6 +45,9 @@
     wg pubkey < {{ wdtt_wg_server_priv_path }} > {{ wdtt_wg_server_pub_path }}
   args:
     creates: "{{ wdtt_wg_server_priv_path }}"
+  # Идемпотентно через creates:, безопасно запускать и в --check —
+  # иначе следующий slurp упадёт на отсутствующем файле.
+  check_mode: false
 
 - name: Прочитать wg1 priv key
   ansible.builtin.slurp:
