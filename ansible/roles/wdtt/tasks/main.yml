@@ -160,3 +160,7 @@
     enabled: true
     state: started
     daemon_reload: true
+  # В --check шаблон выше не создаёт юнит физически, и systemd не
+  # находит сервис → падает с "Could not find the requested service".
+  # В реальном apply таска отработает корректно.
+  when: not ansible_check_mode
