@@ -29,36 +29,35 @@ vpn1 (DTLS-эндпойнт 56000/udp + внутренний WG `wdtt0` 10.66.66
   AltStore или Apple Developer) и macOS (denny4-форк GUI или
   sicmundu-форк CLI)
 
-Что **не сделано** и требует ручного шага перед apply:
-1. **Собрать `wdtt-server` бинарь.** amurcanov не публикует Linux-сервер
-   в Releases (только Android-app). Нужно:
+Что **не сделано** и требует ручного шага перед apply (по убыванию
+важности):
+
+1. **Собрать `wdtt-server` бинарь:**
    ```bash
-   git clone https://github.com/amurcanov/proxy-turn-vk-android
-   cd proxy-turn-vk-android/server
-   go build -o wdtt-server
-   sha256sum wdtt-server
+   make build-wdtt              # = scripts/build-wdtt-server.sh v1.1.0
    ```
-   Бинарь залить куда-то достижимое (S3 / свой GH-Release / просто
-   `scp` на vpn1 заранее), URL и sha256 — в `group_vars/all/vars.yml`:
-   ```yaml
-   wdtt_server_binary_url: "https://..."
-   wdtt_server_binary_sha256: "abc123..."
-   ```
-2. **Уточнить флаги `wdtt-server`.** В `defaults/main.yml` я указал
-   `wdtt_server_args` best-guess по wdtt-analysis.md. После сборки
-   бинаря запустить `./wdtt-server --help`, сверить с моими `-listen`/
-   `-wg-port`/`-wg-iface`/`-wg-subnet`/`-password-file`. Возможно
-   флаги называются иначе — поправить в роли.
-3. **Сгенерировать master-пароль:**
+   Скрипт клонит amurcanov/proxy-turn-vk-android tag v1.1.0, собирает
+   через `go build`, кладёт в `.local/wdtt-server` (gitignore'd).
+   Печатает size+sha256. Затем:
    ```bash
-   openssl rand -base64 24
+   .local/wdtt-server --help    # сверить флаги
    ```
-   В vault как `vault_wdtt_master_password`.
-4. **Открыть UDP 56000 в firewall RuVDS** (внешний DTLS).
-   `wdtt-internal-port` 56001 — внутренний, открывать снаружи не надо,
-   роль и не пытается.
-5. **Поставить флаг `enable_wdtt: true`** — либо в `host_vars/vpn1/vars.yml`,
-   либо передать `-e enable_wdtt=true` при `make apply`.
+   Если флаги отличаются от `wdtt_server_args` в `roles/wdtt/defaults/main.yml`
+   (`-listen`/`-wg-port`/`-wg-iface`/`-wg-subnet`/`-password-file`) —
+   поправить под реальные имена.
+
+2. **Сгенерировать master-пароль и положить в vault:**
+   ```bash
+   make gen-password            # = openssl rand -base64 24
+   make vault-edit              # → вписать как vault_wdtt_master_password
+   ```
+
+3. **Открыть UDP 56000 в firewall RuVDS** (внешний DTLS-эндпойнт).
+   Внутренний 56001 трогать не надо.
+
+Роль `wdtt` теперь включена **по умолчанию** (`enable_wdtt: true` в
+`group_vars/all/vars.yml`). Чтобы временно отключить — `-e enable_wdtt=false`
+при apply.
 
 Потенциальные проблемы которые увидим только при первом apply:
 - **iptables vs nftables.** Если внутри `wdtt-server` есть hardcoded

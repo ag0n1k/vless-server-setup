@@ -1,14 +1,15 @@
 # vless-server-setup
 
-VPN-шлюз: OpenVPN + WireGuard клиенты заходят на VPS, исходящий трафик
+VPN-шлюз: OpenVPN + WireGuard + WDTT клиенты заходят на VPS, исходящий трафик
 заворачивается через `sing-box` (TPROXY) на внешний прокси (VLESS/Reality
 или Shadowsocks из коммерческой подписки). Идея — у пользователя обычный
 VPN-клиент, выход в интернет — через прокси с маскировкой.
 
 ```
-[OVPN-клиенты] ──tun0──┐
-                       ├──> nftables (TPROXY :7895) ──> sing-box ──> внешний proxy
-[WG-клиенты]   ──wg0──┘
+[OVPN-клиенты]   ──tun0───┐
+[WG-клиенты]     ──wg0────┼──> nftables (TPROXY :7895) ──> sing-box ──> внешний proxy
+[WDTT-клиенты]   ──wdtt0──┘    (DTLS через VK TURN
+                                для жёстких whitelist'ов)
 ```
 
 Стенд управляется через **Ansible**. Боевой хост: `194.87.99.207` (RuVDS,
@@ -28,22 +29,28 @@ Ubuntu 24.04). См. `docs/wdtt-analysis.md` — отдельный анализ
 ### Первый запуск
 
 ```bash
-# 1. Сделать vault.yml из шаблона и заполнить subscription URL
+# 1. Собрать wdtt-server бинарь локально (нужен go)
+make build-wdtt
+# → .local/wdtt-server, размер и sha256 в выводе
+.local/wdtt-server --help    # сверить флаги с roles/wdtt/defaults/main.yml
+
+# 2. Сделать vault.yml из шаблона
 cp ansible/group_vars/all/vault.yml.example ansible/group_vars/all/vault.yml
 $EDITOR ansible/group_vars/all/vault.yml
+# Заполнить:
+#   vault_subscription_urls       — URL подписки vpnd.io (из bash_history vpn1)
+#   vault_wdtt_master_password    — make gen-password скопирует в clipboard
 
-# 2. Зашифровать (создаст пароль и сохранит в .vault_pass)
+# 3. Зашифровать
 echo 'мой-пароль-vault' > .vault_pass
 chmod 600 .vault_pass
 ansible-vault encrypt ansible/group_vars/all/vault.yml --vault-password-file=.vault_pass
 
-# 3. Проверить синтаксис
+# 4. Открыть в панели RuVDS firewall: UDP 56000 на вход
+
+# 5. Проверка → план → применение
 make check
-
-# 4. Dry-run: что Ansible собирается изменить
 make plan
-
-# 5. Применить
 make apply
 ```
 
@@ -67,6 +74,8 @@ sing-box config.json.
 | `make switch INDEX=2` | переключить sing-box на ноду #2 |
 | `make switch NEXT=1` | следующая нода по кругу |
 | `make switch NAME=Geneva` | по подстроке label |
+| `make build-wdtt` | собрать `wdtt-server` бинарь локально в `.local/` |
+| `make gen-password` | сгенерировать пароль 24 байта base64 |
 
 Добавить клиента OVPN/WG:
 
@@ -112,8 +121,9 @@ ansible/
     ├── fail2ban/               — sshd + openvpn jails
     ├── openvpn/                — PKI bootstrap (idempotent), server.conf, CCD, NAT
     ├── wireguard/              — wg0.conf из state/wg_peers.yml, NAT
+    ├── wdtt/                   — wdtt-server (DTLS через VK TURN), wdtt0 интерфейс
     ├── singbox/                — config.json из current node, парсер подписки
-    └── tproxy/                 — единая nft-таблица для tun0+wg0, leak-guard
+    └── tproxy/                 — единая nft-таблица для tun0+wg0+wdtt0, leak-guard
 ```
 
 Старые shell-скрипты — в `legacy/` (как документация прежней схемы).

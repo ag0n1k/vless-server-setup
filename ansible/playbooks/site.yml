@@ -36,7 +36,7 @@
       tags: [wireguard]
     - role: wdtt
       tags: [wdtt]
-      when: enable_wdtt | default(false) | bool
+      when: enable_wdtt | default(true) | bool
     - role: singbox
       tags: [singbox]
     - role: tproxy

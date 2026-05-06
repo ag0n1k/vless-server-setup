@@ -11,3 +11,11 @@ ansible/facts/
 
 # Local secrets staged for vault encryption
 .secrets-staging/
+
+# Локальные бинари (wdtt-server и т.п.) — собираются make build-wdtt
+.local/
+
+# Локальные клиентские конфиги (.ovpn, .conf), сгенерированные плейбуками
+.local-clients/
+.local-peers/
+.local-backups/

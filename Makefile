@@ -1,4 +1,4 @@
-.PHONY: help check plan apply status switch refresh-nodes lint vault-edit vault-encrypt-staging facts
+.PHONY: help check plan apply status switch refresh-nodes lint vault-edit vault-encrypt-staging facts build-wdtt gen-password
 
 ANSIBLE       ?= ansible-playbook
 INV           ?= ansible/inventory/hosts.yml
@@ -14,6 +14,8 @@ help:
 	@echo "make refresh-nodes    — обновить /etc/sing-box/nodes.json из подписки"
 	@echo "make switch INDEX=2   — переключить sing-box на ноду #2"
 	@echo "make switch NEXT=1    — следующая нода"
+	@echo "make build-wdtt       — собрать wdtt-server в .local/ (нужен go)"
+	@echo "make gen-password     — сгенерировать пароль (24 байта base64)"
 	@echo "make lint             — ansible-lint (если установлен)"
 	@echo "make vault-edit       — редактировать group_vars/all/vault.yml"
 	@echo "make facts            — снять и закешировать факты с боевого хоста"
@@ -48,3 +50,9 @@ vault-edit:
 
 facts:
 	@$(ANSIBLE) ansible/playbooks/status.yml --tags facts $(ANSIBLE_FLAGS)
+
+build-wdtt:
+	@bash scripts/build-wdtt-server.sh $(VERSION)
+
+gen-password:
+	@openssl rand -base64 24

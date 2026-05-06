@@ -9,14 +9,20 @@
 # поэтому фиксируем 1.1.0.
 # ──────────────────────────────────────────────────────────────────────
 
-# Релиз — TODO: перед apply проверить актуальный URL/версию на
-#   https://github.com/amurcanov/proxy-turn-vk-android/releases
-# и собрать сервер из исходников (server.go) либо взять готовый бинарь
-# из релиза. Поле wdtt_server_binary_url сейчас пустое — apply упадёт
-# на проверке, пока его не заполнишь.
+# Способ доставки бинаря на сервер:
+#   wdtt_server_local_path  — путь к собранному локально бинарю
+#                             (`make build-wdtt` кладёт сюда)
+#   wdtt_server_binary_url  — альтернатива: скачать с http(s)
+#                             (если сервер собирался не на твоей машине)
+# Хотя бы один должен быть задан. Если оба — берётся local_path.
+#
+# Версия 1.0.6/1.1.0 (WG + DTLS, под VK-call камуфляж) — рекомендуется
+# для жёстких белых списков. Версия 1.1.4 уже SOCKS5+KCP, без DTLS-
+# камуфляжа, поэтому фиксируем 1.1.0.
 wdtt_version: "1.1.0"
-wdtt_server_binary_url: ""        # https://github.com/amurcanov/.../releases/download/v1.1.0/wdtt-server-linux-amd64
-wdtt_server_binary_sha256: ""     # sha256 для проверки
+wdtt_server_local_path: "{{ playbook_dir }}/../../.local/wdtt-server"
+wdtt_server_binary_url: ""
+wdtt_server_binary_sha256: ""     # sha256 для проверки (опционально для local_path)
 
 wdtt_install_dir: /usr/local/bin
 wdtt_server_bin: /usr/local/bin/wdtt-server

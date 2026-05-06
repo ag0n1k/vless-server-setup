@@ -52,10 +52,10 @@ f2b_ovpn_bantime: 6h
 f2b_ovpn_logpath: /var/log/openvpn/openvpn.log
 
 # WDTT ───────────────────────────────────────────────────────────────
-# Включается отдельным флагом — роль не запускается по умолчанию,
-# потому что требует отдельного бинаря и заполненного vault'а.
-# enable_wdtt: true — в host_vars или из CLI: -e enable_wdtt=true
-enable_wdtt: false
+# WDTT — стандартный компонент стека. Отключается флагом
+#   -e enable_wdtt=false
+# при apply (если, например, хочешь временно вырубить туннель).
+enable_wdtt: true
 
 # Common ─────────────────────────────────────────────────────────────
 sysctl_extras:

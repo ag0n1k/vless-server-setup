@@ -1,34 +1,30 @@
 ---
 # ──────────────────────────────────────────────────────────────────────
-# WDTT-сервер.
-# Pre-flight: переменная wdtt_server_binary_url должна быть заполнена,
-# иначе роль падает с понятной ошибкой (нечего ставить).
+# WDTT-сервер: DTLS на 56000/udp + внутренний WG wdtt0 (10.66.66.0/24).
+# Бинарь либо из wdtt_server_local_path (приоритет), либо скачивается
+# по wdtt_server_binary_url. Сборка локально: `make build-wdtt`.
 # ──────────────────────────────────────────────────────────────────────
 
-- name: Pre-flight — проверить что URL бинаря задан
+- name: Pre-flight — проверить источник бинаря
   ansible.builtin.assert:
     that:
-      - wdtt_server_binary_url is defined
-      - wdtt_server_binary_url | length > 0
+      - (wdtt_server_local_path | length > 0 and wdtt_server_local_path is exists)
+        or (wdtt_server_binary_url | length > 0)
     fail_msg: |
-      В group_vars не задан wdtt_server_binary_url.
-      Ситуация: amurcanov не публикует готовый wdtt-server-linux-amd64
-      в Releases, придётся собрать самому из server.go:
-        git clone https://github.com/amurcanov/proxy-turn-vk-android
-        cd proxy-turn-vk-android/server
-        go build -o wdtt-server
-      Бинарь залить куда-то (S3/GH-Release собственный/scp), URL —
-      в group_vars/all/vars.yml как wdtt_server_binary_url.
+      Нет источника wdtt-server. Варианты:
+        1) make build-wdtt   — соберёт локально в .local/wdtt-server
+        2) задать wdtt_server_binary_url в group_vars/all/vars.yml,
+           если бинарь хостится где-то снаружи.
 
-- name: Pre-flight — проверить что master-пароль задан в vault
+- name: Pre-flight — проверить master-пароль в vault
   ansible.builtin.assert:
     that:
       - vault_wdtt_master_password is defined
       - vault_wdtt_master_password | length >= 16
     fail_msg: |
-      В group_vars/all/vault.yml должен быть vault_wdtt_master_password
-      (минимум 16 символов). Сгенерировать:
-        openssl rand -base64 24
+      vault_wdtt_master_password отсутствует или короче 16 символов.
+      Сгенерировать: openssl rand -base64 24
+      Положить в ansible/group_vars/all/vault.yml.
 
 - name: Установить wireguard-tools (для интерфейса wdtt0)
   ansible.builtin.apt:
@@ -46,7 +42,20 @@
     - "{{ wdtt_state_dir }}"
     - "{{ wdtt_log_dir }}"
 
-- name: Скачать wdtt-server бинарь
+- name: Залить wdtt-server из локально собранного бинаря
+  when: wdtt_server_local_path | length > 0 and wdtt_server_local_path is exists
+  ansible.builtin.copy:
+    src: "{{ wdtt_server_local_path }}"
+    dest: "{{ wdtt_server_bin }}"
+    mode: "0755"
+    owner: root
+    group: root
+  notify: restart wdtt-server
+
+- name: Скачать wdtt-server по URL (fallback)
+  when:
+    - wdtt_server_binary_url | length > 0
+    - not (wdtt_server_local_path | length > 0 and wdtt_server_local_path is exists)
   ansible.builtin.get_url:
     url: "{{ wdtt_server_binary_url }}"
     dest: "{{ wdtt_server_bin }}"
@@ -64,13 +73,6 @@
   no_log: true
   notify: restart wdtt-server
 
-# ──────────────────────────────────────────────────────────────────────
-# wdtt-server сам поднимает интерфейс wdtt0 как WG-аналог. Снаружи он
-# виден как обычный wireguard-интерфейс с listen 56001/udp на 127.0.0.1
-# (или 0.0.0.0 — зависит от конфигурации). Мы НЕ настраиваем wdtt0
-# через wg-quick, потому что wdtt-server сам этим занимается.
-# ──────────────────────────────────────────────────────────────────────
-
 - name: systemd-юнит wdtt-server
   ansible.builtin.template:
     src: wdtt-server.service.j2
@@ -80,23 +82,21 @@
     - reload systemd
     - restart wdtt-server
 
-- name: nftables — NAT и forward для wdtt0
+- name: nftables — leak-фильтр на входящий 56000/udp (только VK CDN)
   ansible.builtin.copy:
     dest: /etc/nftables.d/wdtt.nft
     mode: "0644"
     content: |
-      # MASQUERADE НЕ нужен: трафик с wdtt0 идёт через TPROXY → sing-box,
-      # а sing-box уже проксирует через свой outbound. Если когда-нибудь
-      # понадобится прямой выход с wdtt0 (минуя sing-box) — добавь:
+      # MASQUERADE для wdtt0 не нужен: трафик идёт через TPROXY → sing-box.
+      # Если когда-нибудь понадобится прямой выход с wdtt0 (минуя sing-box):
       #   table ip wdtt_nat { chain postrouting {
       #     type nat hook postrouting priority 100; policy accept;
       #     oifname "{{ wan_iface }}" ip saddr {{ wdtt_subnet }} masquerade
       #   } }
 
-      # Разрешаем входящий DTLS на 56000/udp с WAN.
-      # ВАЖНО: пропускаем ТОЛЬКО трафик с VK CDN-сетей, чтобы wdtt-server
-      # не светился наружу как открытый порт. Перечень — best-effort из
-      # wdtt-analysis.md, актуализировать раз в полгода.
+      # Дроп всех входящих 56000/udp от не-VK адресов.
+      # Подсети VK CDN — best-effort из wdtt-analysis.md, обновлять раз
+      # в полгода (vk_cdn_v4 set ниже).
       table inet wdtt_input {
         set vk_cdn_v4 {
           type ipv4_addr
@@ -112,7 +112,6 @@
         }
         chain input {
           type filter hook input priority filter; policy accept;
-          # сначала reject от не-VK адресов
           iifname "{{ wan_iface }}" udp dport {{ wdtt_external_port }} \
             ip saddr != @vk_cdn_v4 drop
         }
