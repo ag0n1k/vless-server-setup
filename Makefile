@@ -3,8 +3,10 @@
 ANSIBLE       ?= ansible-playbook
 INV           ?= ansible/inventory/hosts.yml
 HOST          ?= vpn1
-VAULT_PASS    ?= .vault_pass
-ANSIBLE_FLAGS ?= --vault-password-file=$(VAULT_PASS)
+# Если ansible.cfg задаёт vault_password_file — этого достаточно.
+# Можно переопределить через `make apply VAULT_PASS=/path/to/file`.
+VAULT_PASS    ?=
+ANSIBLE_FLAGS ?= $(if $(VAULT_PASS),--vault-password-file=$(VAULT_PASS))
 
 help:
 	@echo "make check            — syntax check всех playbooks"
@@ -46,7 +48,7 @@ lint:
 	@command -v ansible-lint >/dev/null && ansible-lint ansible/playbooks/site.yml || echo "ansible-lint not installed"
 
 vault-edit:
-	@ansible-vault edit ansible/group_vars/all/vault.yml --vault-password-file=$(VAULT_PASS)
+	@ansible-vault edit ansible/group_vars/all/vault.yml $(if $(VAULT_PASS),--vault-password-file=$(VAULT_PASS))
 
 facts:
 	@$(ANSIBLE) ansible/playbooks/status.yml --tags facts $(ANSIBLE_FLAGS)
