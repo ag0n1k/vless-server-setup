@@ -8,6 +8,7 @@ ansible/inventory/group_vars/all/vault.yml
 ansible/inventory/host_vars/*/vault.yml
 ansible/.cache/
 ansible/facts/
+ansible/*.log
 
 # Local secrets staged for vault encryption
 .secrets-staging/
