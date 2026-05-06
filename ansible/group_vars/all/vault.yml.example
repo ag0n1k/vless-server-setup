@@ -10,7 +10,7 @@
 # Подписки sing-box (один или несколько URL через пробел в каждом значении).
 # Поддерживаются ss:// и vless:// в plain или base64-закодированном теле.
 vault_subscription_urls: >-
-  https://vpnd.io/subscription/ss/<TOKEN>/?ru=1
+  https://vpnd.io/subscription/vless/89983b93becd88694ca2ccc9ee2556a4ad0733e560d3cb8e44179b09e39113c7/?re=1
 
 # (опционально) Пароль для генерации новых клиентских OVPN-ключей с passphrase.
 # Если используешь nopass-режим — оставь пустым.

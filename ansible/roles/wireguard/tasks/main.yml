@@ -50,6 +50,67 @@
     _wg_psk_map: "{{ vault_wg_peer_psks | default({}) }}"
   no_log: true
 
+# ──────────────────────────────────────────────────────────────────────
+# Защита от молчаливого drop'а PSK у уже работающих пиров.
+# Если на сервере уже есть wg0.conf с PresharedKey, а в vault для этого
+# pubkey нет записи (или PSK не совпадает) — apply сгенерил бы конфиг
+# без PSK, после `wg syncconf` сторона сервера потеряла бы PSK и
+# handshake к этому пиру сломался. Поэтому падаем заранее.
+# ──────────────────────────────────────────────────────────────────────
+- name: Прочитать PSK текущего wg0.conf (если файл есть)
+  ansible.builtin.shell: |
+    set -e
+    if [ -r {{ wg_dir }}/{{ wg_interface }}.conf ]; then
+      awk '
+        /^\[Peer\]/    { pub=""; psk="" }
+        /^PublicKey/   { pub=$3 }
+        /^PresharedKey/{ psk=$3; if (pub && psk) printf "%s|%s\n", pub, psk }
+      ' {{ wg_dir }}/{{ wg_interface }}.conf
+    fi
+  args:
+    executable: /bin/bash
+  register: _existing_psks_raw
+  changed_when: false
+  no_log: true
+  failed_when: false
+
+- name: Распарсить pubkey→psk из текущего конфига
+  ansible.builtin.set_fact:
+    _existing_psks_map: >-
+      {{
+        dict(
+          (_existing_psks_raw.stdout_lines | default([]))
+          | map('split', '|') | list
+        )
+      }}
+  no_log: true
+
+- name: Pre-flight — все ли существующие PSK заданы в vault_wg_peer_psks
+  ansible.builtin.assert:
+    that:
+      - vault_wg_peer_psks is defined
+      - item.key in (vault_wg_peer_psks | default({}))
+      - (vault_wg_peer_psks[item.key] | default('')) == item.value
+    fail_msg: |
+      WG-пир с pubkey {{ item.key }} сейчас работает на сервере с PSK,
+      но в vault его либо нет, либо он отличается. Если применить как
+      есть — после `wg syncconf` PSK исчезнет на стороне сервера и
+      handshake сломается.
+
+      Вытащи актуальные PSK одной командой:
+        ssh root@{{ ansible_host }} \
+          'awk "/^\\[Peer\\]/{pub=psk=\"\"} /^PublicKey/{pub=\$3} /^PresharedKey/{print pub,\$3}" \
+            /etc/wireguard/wg0.conf'
+
+      Положи в ansible/group_vars/all/vault.yml:
+        vault_wg_peer_psks:
+          "<pubkey1>": "<psk1>"
+          "<pubkey2>": "<psk2>"
+  loop: "{{ _existing_psks_map | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: false
+
 - name: Сгенерировать конфиг wg0
   ansible.builtin.template:
     src: wg0.conf.j2

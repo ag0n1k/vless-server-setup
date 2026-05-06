@@ -123,18 +123,54 @@ make build-wdtt
 
 ### 2. Vault
 
+⚠️ **КРИТИЧНО: PSK для wg0 пиров надо обязательно достать с сервера.**
+Сейчас giga и hopper подключены по WG **с PSK**. Если apply сгенерит
+wg0.conf без PSK — handshake сломается и оба site-to-site линка
+(LAN1 192.168.1.0/24 и LAN2 192.168.2.0/24) отвалятся. Pre-flight
+в роли wireguard это поймает, но только если ты дашь ему правильные
+PSK.
+
 ```bash
+# 2.1. Достать PSK для всех текущих wg0-пиров с сервера
+ssh root@194.87.99.207 \
+  'awk "/^\\[Peer\\]/{pub=psk=\"\"} /^PublicKey/{pub=\$3} /^PresharedKey/{print pub,\$3}" \
+    /etc/wireguard/wg0.conf'
+# → oNhNWNriK5WPshCsDIeUwcYlPHT+pHBsbZcdRXgR0nk= <psk_giga>
+# → YDoa/IQksOFO4jkyVsetK2VYNnO8At16j8KceRYR/3M= <psk_hopper>
+
+# 2.2. Достать subscription URL (тоже из bash_history)
+ssh root@194.87.99.207 'grep -oE "https://vpnd.io[^ \"]+" /root/.bash_history | head -1'
+
+# 2.3. Создать и заполнить vault
 cp ansible/group_vars/all/vault.yml.example ansible/group_vars/all/vault.yml
 $EDITOR ansible/group_vars/all/vault.yml
-# Минимум:
-#   vault_subscription_urls: https://vpnd.io/subscription/ss/<токен>/?ru=1
-# (токен есть в bash_history vpn1 — посмотри:
-#  ssh root@194.87.99.207 'grep "vpnd.io" /root/.bash_history | head -3')
+```
 
+Минимум для первого apply:
+```yaml
+vault_subscription_urls: >-
+  https://vpnd.io/subscription/ss/<токен>/?ru=1
+
+vault_wg_peer_psks:
+  "oNhNWNriK5WPshCsDIeUwcYlPHT+pHBsbZcdRXgR0nk=": "<psk_giga>"
+  "YDoa/IQksOFO4jkyVsetK2VYNnO8At16j8KceRYR/3M=": "<psk_hopper>"
+
+# wdtt-peer'ы (wg1) пока пустые — ничего не отвалится, потому
+# что wdtt_peers тоже пустой. Заполнишь после первого apply.
+vault_wdtt_peer_psks: {}
+```
+
+```bash
+# 2.4. Зашифровать
 echo 'твой-долгий-vault-пароль' > .vault_pass
 chmod 600 .vault_pass
 ansible-vault encrypt ansible/group_vars/all/vault.yml --vault-password-file=.vault_pass
 ```
+
+> **Что бывает если забыть PSK для wg0:** pre-flight assertion в
+> `roles/wireguard/tasks/main.yml` упадёт ДО того как сгенерится
+> новый wg0.conf, с подсказкой какой именно pubkey не хватает.
+> То есть нельзя случайно убить giga/hopper.
 
 ### 3. Открыть UDP 56000 в RuVDS
 
