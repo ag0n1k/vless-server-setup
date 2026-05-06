@@ -3,9 +3,16 @@
 ifconfig-push {{ item.fixed_ip }} {{ openvpn_subnet_mask }}
 {% endif %}
 {% for net in (item.iroute | default([])) %}
-{% set parts = net.split('/') %}
-{% set ip = parts[0] %}
-{% set mask_bits = parts[1] | int %}
-{% set mask = ((((1 << 32) - 1) << (32 - mask_bits)) & ((1 << 32) - 1)) %}
-iroute {{ ip }} {{ ((mask >> 24) & 0xff) }}.{{ ((mask >> 16) & 0xff) }}.{{ ((mask >> 8) & 0xff) }}.{{ (mask & 0xff) }}
+{%- set parts = net.split('/') -%}
+{%- set ip = parts[0] -%}
+{%- set mask_bits = parts[1] | int -%}
+{%- set octets = [] -%}
+{%- for i in range(4) -%}
+  {%- set b = mask_bits - i * 8 -%}
+  {%- if b >= 8 -%}{{ octets.append(255) or '' }}
+  {%- elif b > 0 -%}{{ octets.append((256 - (2 ** (8 - b)) | int)) or '' }}
+  {%- else -%}{{ octets.append(0) or '' }}
+  {%- endif -%}
+{%- endfor %}
+iroute {{ ip }} {{ octets | join('.') }}
 {% endfor %}
