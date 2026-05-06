@@ -7,6 +7,9 @@
   ansible.builtin.systemd:
     name: vk-turn-proxy.service
     state: restarted
+  # См. taska "Включить и запустить vk-turn-proxy" — в check-mode
+  # юнит-файл ещё не создан физически.
+  when: not ansible_check_mode
 
 - name: reload wg1
   ansible.builtin.shell: |
