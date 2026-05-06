@@ -1,8 +1,10 @@
 ---
 # ──────────────────────────────────────────────────────────────────────
-# WDTT-сервер: DTLS на 56000/udp + внутренний WG wdtt0 (10.66.66.0/24).
-# Бинарь либо из wdtt_server_local_path (приоритет), либо скачивается
-# по wdtt_server_binary_url. Сборка локально: `make build-wdtt`.
+# WDTT (cacggghp/vk-turn-proxy):
+#   • второй WG-интерфейс wg1 на :51821 (localhost-only через nft-drop)
+#   • vk-turn-proxy server :56000 (DTLS) → 127.0.0.1:51821
+#   • nft-фильтр на входящий :56000 — только из VK CDN-сетей
+#   • TPROXY (через roles/tproxy) перехватывает трафик с wg1 в sing-box
 # ──────────────────────────────────────────────────────────────────────
 
 - name: Pre-flight — проверить источник бинаря
@@ -11,92 +13,117 @@
       - (wdtt_server_local_path | length > 0 and wdtt_server_local_path is exists)
         or (wdtt_server_binary_url | length > 0)
     fail_msg: |
-      Нет источника wdtt-server. Варианты:
-        1) make build-wdtt   — соберёт локально в .local/wdtt-server
-        2) задать wdtt_server_binary_url в group_vars/all/vars.yml,
-           если бинарь хостится где-то снаружи.
+      Нет источника vk-turn-proxy. Варианты:
+        1) make build-wdtt   — скачает release-бинарь в .local/vk-turn-proxy
+        2) задать wdtt_server_binary_url в group_vars/all/vars.yml
 
-- name: Pre-flight — проверить master-пароль в vault
-  ansible.builtin.assert:
-    that:
-      - vault_wdtt_master_password is defined
-      - vault_wdtt_master_password | length >= 16
-    fail_msg: |
-      vault_wdtt_master_password отсутствует или короче 16 символов.
-      Сгенерировать: openssl rand -base64 24
-      Положить в ansible/group_vars/all/vault.yml.
-
-- name: Установить wireguard-tools (для интерфейса wdtt0)
+- name: Установить wireguard-tools
   ansible.builtin.apt:
     name: wireguard-tools
     state: present
 
-- name: Каталоги для wdtt
+- name: Каталог логов vk-turn-proxy
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ vkturn_log_dir }}"
     state: directory
     mode: "0755"
-    owner: root
-    group: root
-  loop:
-    - "{{ wdtt_state_dir }}"
-    - "{{ wdtt_log_dir }}"
+    owner: nobody
+    group: nogroup
 
-- name: Залить wdtt-server из локально собранного бинаря
+- name: Каталог /etc/wireguard
+  ansible.builtin.file:
+    path: /etc/wireguard
+    state: directory
+    mode: "0700"
+
+# ── Второй WG-инстанс wg1 для туннеля ────────────────────────────────
+- name: Сгенерировать wg1 priv/pub (только если ещё нет)
+  ansible.builtin.shell: |
+    set -e
+    umask 077
+    wg genkey > {{ wdtt_wg_server_priv_path }}
+    wg pubkey < {{ wdtt_wg_server_priv_path }} > {{ wdtt_wg_server_pub_path }}
+  args:
+    creates: "{{ wdtt_wg_server_priv_path }}"
+
+- name: Прочитать wg1 priv key
+  ansible.builtin.slurp:
+    src: "{{ wdtt_wg_server_priv_path }}"
+  register: _wg1_priv_b64
+  no_log: true
+
+- name: Прочитать wg1 pub key
+  ansible.builtin.slurp:
+    src: "{{ wdtt_wg_server_pub_path }}"
+  register: _wg1_pub_b64
+
+- name: Сохранить ключи как факты
+  ansible.builtin.set_fact:
+    wdtt_wg_server_priv: "{{ _wg1_priv_b64.content | b64decode | trim }}"
+    wdtt_wg_server_pub: "{{ _wg1_pub_b64.content | b64decode | trim }}"
+  no_log: true
+
+- name: Загрузить state/wdtt_peers.yml
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/../state/wdtt_peers.yml"
+
+- name: Прочитать PSK мап из vault
+  ansible.builtin.set_fact:
+    _wdtt_psk_map: "{{ vault_wdtt_peer_psks | default({}) }}"
+  no_log: true
+
+- name: Сгенерировать /etc/wireguard/wg1.conf
+  ansible.builtin.template:
+    src: wg1.conf.j2
+    dest: /etc/wireguard/wg1.conf
+    mode: "0600"
+    backup: true
+  notify: reload wg1
+
+- name: Включить wg-quick@wg1
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ wdtt_wg_iface }}.service"
+    enabled: true
+    state: started
+
+# ── vk-turn-proxy сервер ─────────────────────────────────────────────
+- name: Залить vk-turn-proxy из локально скачанного бинаря
   when: wdtt_server_local_path | length > 0 and wdtt_server_local_path is exists
   ansible.builtin.copy:
     src: "{{ wdtt_server_local_path }}"
-    dest: "{{ wdtt_server_bin }}"
+    dest: "{{ vkturn_server_bin }}"
     mode: "0755"
     owner: root
     group: root
-  notify: restart wdtt-server
+  notify: restart vk-turn-proxy
 
-- name: Скачать wdtt-server по URL (fallback)
+- name: Скачать vk-turn-proxy по URL (fallback)
   when:
     - wdtt_server_binary_url | length > 0
     - not (wdtt_server_local_path | length > 0 and wdtt_server_local_path is exists)
   ansible.builtin.get_url:
     url: "{{ wdtt_server_binary_url }}"
-    dest: "{{ wdtt_server_bin }}"
+    dest: "{{ vkturn_server_bin }}"
     mode: "0755"
     checksum: "{{ ('sha256:' + wdtt_server_binary_sha256) if wdtt_server_binary_sha256 | length > 0 else omit }}"
-  notify: restart wdtt-server
+  notify: restart vk-turn-proxy
 
-- name: Положить master-пароль (только root)
-  ansible.builtin.copy:
-    dest: "{{ wdtt_state_dir }}/master.password"
-    content: "{{ vault_wdtt_master_password }}"
-    owner: root
-    group: root
-    mode: "0600"
-  no_log: true
-  notify: restart wdtt-server
-
-- name: systemd-юнит wdtt-server
+- name: systemd-юнит vk-turn-proxy
   ansible.builtin.template:
-    src: wdtt-server.service.j2
-    dest: /etc/systemd/system/wdtt-server.service
+    src: vk-turn-proxy.service.j2
+    dest: /etc/systemd/system/vk-turn-proxy.service
     mode: "0644"
   notify:
     - reload systemd
-    - restart wdtt-server
+    - restart vk-turn-proxy
 
-- name: nftables — leak-фильтр на входящий 56000/udp (только VK CDN)
+- name: nftables — leak-фильтр и закрытие 51821 снаружи
   ansible.builtin.copy:
     dest: /etc/nftables.d/wdtt.nft
     mode: "0644"
     content: |
-      # MASQUERADE для wdtt0 не нужен: трафик идёт через TPROXY → sing-box.
-      # Если когда-нибудь понадобится прямой выход с wdtt0 (минуя sing-box):
-      #   table ip wdtt_nat { chain postrouting {
-      #     type nat hook postrouting priority 100; policy accept;
-      #     oifname "{{ wan_iface }}" ip saddr {{ wdtt_subnet }} masquerade
-      #   } }
-
-      # Дроп всех входящих 56000/udp от не-VK адресов.
-      # Подсети VK CDN — best-effort из wdtt-analysis.md, обновлять раз
-      # в полгода (vk_cdn_v4 set ниже).
+      # Дропаем входящие udp/56000 от не-VK сетей (защита от open-internet
+      # сканов). Подсети VK CDN — best-effort, обновлять раз в полгода.
       table inet wdtt_input {
         set vk_cdn_v4 {
           type ipv4_addr
@@ -112,15 +139,21 @@
         }
         chain input {
           type filter hook input priority filter; policy accept;
+
+          # 56000/udp — только от VK CDN
           iifname "{{ wan_iface }}" udp dport {{ wdtt_external_port }} \
             ip saddr != @vk_cdn_v4 drop
+
+          # 51821/udp — внутренний WG, снаружи закрыт.
+          # vk-turn-proxy ходит к нему через 127.0.0.1, лоопбэк не блокируем.
+          iifname "{{ wan_iface }}" udp dport {{ wdtt_wg_port }} drop
         }
       }
   notify: reload nftables
 
-- name: Включить и запустить wdtt-server
+- name: Включить и запустить vk-turn-proxy
   ansible.builtin.systemd:
-    name: wdtt-server.service
+    name: vk-turn-proxy.service
     enabled: true
     state: started
     daemon_reload: true

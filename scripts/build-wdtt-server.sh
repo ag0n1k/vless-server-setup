@@ -1,52 +1,60 @@
 #!/usr/bin/env bash
-# Сборка wdtt-server из исходников amurcanov/proxy-turn-vk-android.
-# Кладёт бинарь в .local/wdtt-server, печатает sha256 и размер.
-# Запуск: bash scripts/build-wdtt-server.sh [version]   # default: v1.1.0
+# Получает vk-turn-proxy server-бинарь (cacggghp/vk-turn-proxy):
+# по умолчанию — скачивает готовый release, или собирает локально с --build.
+# Кладёт в .local/vk-turn-proxy, печатает sha256 и размер.
+#
+# Использование:
+#   bash scripts/build-wdtt-server.sh                  # release v1.8.3
+#   bash scripts/build-wdtt-server.sh v1.8.3
+#   bash scripts/build-wdtt-server.sh --build          # собрать main из исходников
+#   bash scripts/build-wdtt-server.sh --build v1.8.3   # собрать конкретный tag
 
 set -euo pipefail
 
-VERSION="${1:-v1.1.0}"
-REPO_URL="https://github.com/amurcanov/proxy-turn-vk-android"
+REPO="cacggghp/vk-turn-proxy"
+BUILD_FROM_SOURCE=0
+VERSION="v1.8.3"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --build) BUILD_FROM_SOURCE=1; shift ;;
+    v*)      VERSION="$1"; shift ;;
+    *)       echo "Unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
 OUT_DIR="$(cd "$(dirname "$0")/.." && pwd)/.local"
-BIN_PATH="${OUT_DIR}/wdtt-server"
-WORK_DIR="$(mktemp -d -t wdtt-build.XXXXXX)"
-trap 'rm -rf "${WORK_DIR}"' EXIT
-
-if ! command -v go >/dev/null 2>&1; then
-  echo "ERROR: Go не установлен. brew install go (macOS) или apt-get install golang (Linux)" >&2
-  exit 1
-fi
-
-echo "[*] Клонирую ${REPO_URL} @ ${VERSION}..."
-git clone --depth 1 --branch "${VERSION}" "${REPO_URL}" "${WORK_DIR}/src" || {
-  echo "[!] Tag ${VERSION} не найден, клонирую main"
-  git clone --depth 1 "${REPO_URL}" "${WORK_DIR}/src"
-}
-
-# Сервер живёт в подкаталоге server/ (по структуре wdtt-analysis.md).
-# Если структура изменилась — найдём server.go.
-SERVER_DIR="$(find "${WORK_DIR}/src" -type d -name server -print -quit)"
-if [[ -z "${SERVER_DIR}" || ! -f "${SERVER_DIR}/server.go" ]]; then
-  SERVER_DIR="$(dirname "$(find "${WORK_DIR}/src" -type f -name 'server.go' -print -quit || true)")"
-fi
-if [[ -z "${SERVER_DIR}" ]]; then
-  echo "ERROR: server.go не найден в репо. Проверь структуру upstream'а:" >&2
-  find "${WORK_DIR}/src" -maxdepth 2 -type d | sed 's/^/  /' >&2
-  exit 1
-fi
-
-echo "[*] Собираю в ${SERVER_DIR}..."
+BIN_PATH="${OUT_DIR}/vk-turn-proxy"
 mkdir -p "${OUT_DIR}"
-(
-  cd "${SERVER_DIR}"
-  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
-    -ldflags='-s -w' \
-    -o "${BIN_PATH}" \
-    ./...
-)
+
+if [[ "${BUILD_FROM_SOURCE}" == "1" ]]; then
+  if ! command -v go >/dev/null 2>&1; then
+    echo "ERROR: Go не установлен. brew install go (macOS) / apt-get install golang (Linux)" >&2
+    exit 1
+  fi
+  WORK_DIR="$(mktemp -d -t vkturn-build.XXXXXX)"
+  trap 'rm -rf "${WORK_DIR}"' EXIT
+
+  echo "[*] Клонирую github.com/${REPO} @ ${VERSION}..."
+  if ! git clone --depth 1 --branch "${VERSION}" "https://github.com/${REPO}" "${WORK_DIR}/src" 2>/dev/null; then
+    echo "[!] Tag ${VERSION} не найден, клонирую main"
+    git clone --depth 1 "https://github.com/${REPO}" "${WORK_DIR}/src"
+  fi
+
+  echo "[*] go build -o ${BIN_PATH}..."
+  (
+    cd "${WORK_DIR}/src"
+    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags='-s -w' -o "${BIN_PATH}" ./server
+  )
+else
+  URL="https://github.com/${REPO}/releases/download/${VERSION}/server-linux-amd64"
+  echo "[*] Скачиваю ${URL}"
+  curl -fL --progress-bar -o "${BIN_PATH}" "${URL}"
+  chmod +x "${BIN_PATH}"
+fi
 
 if [[ ! -x "${BIN_PATH}" ]]; then
-  echo "ERROR: бинарь не создался: ${BIN_PATH}" >&2
+  echo "ERROR: бинарь не появился: ${BIN_PATH}" >&2
   exit 1
 fi
 
@@ -59,12 +67,11 @@ cat <<EOF
   Path:    ${BIN_PATH}
   Size:    ${SIZE} bytes
   SHA256:  ${SHA256}
-  Version: ${VERSION}
+  Version: ${VERSION}$([ "${BUILD_FROM_SOURCE}" = "1" ] && echo " (built from source)" || echo " (release)")
 
-Можно прогнать:
-  ${BIN_PATH} --help    # сверить флаги с wdtt_server_args в роли
+Сверь флаги (должны быть -listen и -connect):
+  ${BIN_PATH} -h
 
 Дальше:
-  make plan   # увидишь diff включая раскатку wdtt-server на vpn1
-  make apply  # применить
+  make plan && make apply
 EOF

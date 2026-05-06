@@ -1,149 +1,132 @@
-# WDTT-клиенты для iPhone и macOS
+# WDTT-клиенты для iPhone, macOS, Android
 
-Контекст: на vpn1 поднят WDTT-сервер (`roles/wdtt/`). С устройства,
-сидящего за DPI с белым списком VK CDN, нужно достучаться до vpn1 через
-VK TURN-relay так, чтобы DPI видел обычный VK-звонок. После туннеля
-трафик попадает в `wdtt0` (10.66.66.0/24) → TPROXY → sing-box → vpnd.io.
+Контекст: на vpn1 поднят `vk-turn-proxy` сервер (`roles/wdtt/`), который
+слушает 56000/udp DTLS-эндпойнт и форвардит распакованный WG-payload
+на локальный `wg1` (10.66.66.0/24). С устройства, сидящего за DPI с
+белым списком VK CDN, нужно поднять WireGuard-туннель, инкапсулированный
+в DTLS+TURN через VK CDN.
 
-Официальный клиент `amurcanov/proxy-turn-vk-android` существует только
-для **Android**. Для iOS/macOS есть **community-форки**, ниже —
-варианты с честной пометкой о качестве.
+Топология на стороне устройства:
 
-> ⚠️ Я (Claude) не проверял эти форки исходниками. Прежде чем доверять
-> им трафик и токены VK-аккаунта — пройдись по коду или хотя бы
-> посмотри issues/commits.
+```
+[iPhone/Mac/Android]
+     │
+     ▼  WireGuard endpoint = 127.0.0.1:9000
+[локальный vk-turn-proxy клиент / форк]
+     │  принимает WG-пакеты, инкапсулирует в DTLS, шлёт через TURN
+     ▼
+[VK TURN relay]
+     │
+     ▼  UDP/56000
+[vpn1:56000 vk-turn-proxy сервер]
+     │
+     ▼  127.0.0.1:51821
+[wg1 на vpn1] → TPROXY → sing-box → vpnd.io → интернет
+```
+
+Upstream-проект: <https://github.com/cacggghp/vk-turn-proxy> v1.8.x.
 
 ---
 
 ## Что нужно подготовить (общее)
 
-Из `docs/wdtt-analysis.md` § «Установка»:
-
-1. **Отдельный VK-аккаунт.** Не основной, не привязанный к карте.
-   VK иногда банит за нестандартные сценарии звонков.
-2. **Пустая VK-группа** (Сообщества → Создать).
-3. **Активный групповой звонок** в этой группе:
+1. **VK-аккаунт** (рекомендуется отдельный) и пустая VK-группа.
+2. **Активный групповой звонок** в этой группе:
    - заходишь в группу → Звонки → начать групповой звонок
-   - в окне звонка: «Скопировать ссылку приглашения» → получишь
-     `https://vk.com/call/join/<hash>`
-   - **звонок НЕ закрывать** — хеш живёт пока комната активна
-   - при выходе тапать «Просто завершить», НЕ «Завершить для всех»
-4. **Координаты сервера vpn1**:
-   - Host: `194.87.99.207`
-   - Внешний порт WDTT (DTLS): `56000/udp`
-   - Master-пароль (из `vault_wdtt_master_password`) — спросить у себя
-     же из `ansible-vault view ansible/group_vars/all/vault.yml`
+   - «Скопировать ссылку приглашения» → `https://vk.com/call/join/<hash>`
+   - **звонок НЕ закрывать** — ссылка валидна, пока никто не нажмёт
+     «Завершить для всех»
+3. **Координаты vpn1**:
+   - host: `194.87.99.207`
+   - external port: `56000/udp`
+4. **WG-конфиг для wg1**, сгенерированный на твоей машине:
+   ```bash
+   ansible-playbook ansible/playbooks/add-wdtt-peer.yml \
+     -e name=myiphone -e wg_ip=10.66.66.10
+   # → .local-peers/wdtt/myiphone.conf + pubkey/PSK для state/vault
+   ```
 
 ---
 
-## iOS
+## iOS — `nullcstring/turnbridge`
 
-### Вариант 1: `anton48/vk-turn-proxy-ios` (рекомендуется)
+Репо: <https://github.com/nullcstring/turnbridge>
 
-Репо: <https://github.com/anton48/vk-turn-proxy-ios>
+Это клиент iOS, рекомендованный самим cacggghp в README. Использует
+`NEPacketTunnelProvider` (VPN-расширение iOS), без джейла.
 
-Это форк WDTT под iOS, использует `NEPacketTunnelProvider` (VPN-расширение
-iOS). Установка без джейла — только два пути:
+**Установка** (без App Store):
 
-1. **Apple Developer аккаунт ($99/год)**
-   - Открыть проект в Xcode
-   - Подписать своим Team ID
-   - Собрать и установить через USB на iPhone
-   - **Профиль живёт год**, не нужно перепеживать каждые 7 дней
-2. **AltStore + бесплатный Apple ID**
-   - Установить AltStore на Mac/PC: <https://altstore.io>
-   - Спарить iPhone с Mac
-   - Через AltServer установить .ipa из релиза форка
-   - **Подпись живёт 7 дней**, AltStore делает auto-refresh когда iPhone в
-     одной Wi-Fi-сети с Mac
+1. **Apple Developer аккаунт ($99/год)** — открыть проект в Xcode,
+   подписать своим Team ID, собрать и установить через USB. Профиль
+   живёт год, потом перепеподписывать.
+2. **AltStore + бесплатный Apple ID** — установить AltStore на Mac/PC
+   (<https://altstore.io>), спарить iPhone, через AltServer установить
+   .ipa из релиза `turnbridge`. Подпись живёт 7 дней, AltStore делает
+   auto-refresh когда iPhone в одной Wi-Fi с Mac.
 
-Конфиг в приложении (типичный для WDTT):
+**Конфиг в приложении:**
+- WG-конфиг: импортировать `.local-peers/wdtt/myiphone.conf` (QR или
+  файл)
 - VK invite link: `https://vk.com/call/join/<hash>`
-- Server endpoint: `194.87.99.207:56000`
-- Tunnel password: `<vault_wdtt_master_password>`
-- Streams (потоков): начни с 9, увеличивай до 18 если стабильно
-- Captcha mode: WebView (ручной слайдер, надёжнее автоматики)
-
-### Вариант 2: `kusha/ios-vpn-tun`
-
-Репо: <https://github.com/kusha/ios-vpn-tun>
-
-Альтернативный форк. Менее популярен, но ставится так же.
-
-### Что НЕ работает на iOS
-
-- iOS App Store: **никогда**, Apple не пропустит VPN, использующий
-  чужую инфру VK без согласия VK
-- TrollStore: только на iOS 14.0–16.6.1, на свежих iOS не сработает
-- Sideloadly без Mac: можно, но лимит 3 sideloaded apps на бесплатном Apple ID
-
-### Что делать с iOS-клиентом за DPI
-
-Когда клиент уже установлен и работает:
-
-1. На VPS уже работает sing-box с outbound через vpnd.io.
-2. WDTT-туннель будет роутить **весь** трафик iPhone, включая 0.0.0.0/0.
-3. Это значит iPhone будет видеть IP-адрес vpnd.io-ноды, не свой
-   мобильный.
-4. Если что-то на iPhone должно ходить мимо туннеля (банковские,
-   локальные мессенджеры) — добавить в `Excluded Apps` в WDTT
-   (вкладка «Исключения» в android-app, в iOS-форке должно быть
-   аналогично).
+- TURN server: `194.87.99.207:56000`
+- Streams: 9 или 18 (увеличивай до 18 если канал стабильный)
+- Captcha: WebView (ручной слайдер) надёжнее автоматики
 
 ---
 
-## macOS
-
-### Вариант 1: `denny4-user/vk-turn-proxy-macos-gui` (с UI)
+## macOS — `denny4-user/vk-turn-proxy-macos-gui`
 
 Репо: <https://github.com/denny4-user/vk-turn-proxy-macos-gui>
 
-GUI-приложение под macOS, поднимает свой `utun`-интерфейс через
-`NetworkExtension`. Подпись разработчика обычно отсутствует — Gatekeeper
-будет ругаться, обходится через:
+GUI-клиент под macOS, поднимает `utun`-интерфейс через
+`NetworkExtension`. Подпись разработчика отсутствует — Gatekeeper
+ругается, обходится так:
 
 ```bash
 # Снять карантин с .app
 xattr -dr com.apple.quarantine /Applications/VK\ Turn\ Proxy.app
 
-# Если не помогает — Settings → Privacy & Security → "Open Anyway"
+# Если не помогает — System Settings → Privacy & Security → "Open Anyway"
 ```
 
 После запуска: те же поля что и на iOS-клиенте.
 
-### Вариант 2: `sicmundu/vk-turn-proxy-macos` (CLI)
+### Альтернатива: CLI на macOS
 
-Репо: <https://github.com/sicmundu/vk-turn-proxy-macos>
-
-CLI-демон без UI. Запускается через:
-
-```bash
-brew install go
-git clone https://github.com/sicmundu/vk-turn-proxy-macos
-cd vk-turn-proxy-macos
-go build -o vkturn
-sudo ./vkturn \
-  --vk "https://vk.com/call/join/<hash>" \
-  --peer 194.87.99.207:56000 \
-  --password '<master_password>' \
-  --workers 18
-```
-
-Преимущество: можно завернуть в `launchd`-юнит и автозапуск.
-Недостаток: исключения по приложениям не настроишь — туннель глобальный.
-
-### Вариант 3: запустить Android-клиент на macOS через эмулятор
-
-Самый «честный» путь, потому что использует официальное приложение
-amurcanov:
+В `client/main.go` репо cacggghp есть кросс-платформенный клиент Go.
+Можно собрать сам:
 
 ```bash
-brew install --cask android-studio
-# создать эмулятор API 30+, поставить WDTT.apk туда
+git clone https://github.com/cacggghp/vk-turn-proxy
+cd vk-turn-proxy/client
+go build -o vk-turn-client
+sudo ./vk-turn-client \
+  -peer 194.87.99.207:56000 \
+  -vk "https://vk.com/call/join/<hash>" \
+  -listen 127.0.0.1:9000 \
+  -workers 18
+# в WG-app на маке: импортируй .local-peers/wdtt/mymac.conf,
+# Endpoint должен быть = 127.0.0.1:9000 (это уже в conf'е по умолчанию)
 ```
 
-Грубо, медленно, не для постоянного использования. Только если форки
-ломаются.
+Преимущество CLI — можно завернуть в `launchd`-юнит и запускать
+автоматически.
+
+---
+
+## Android (если понадобится)
+
+Из README cacggghp — три рекомендуемых клиента:
+
+1. **<https://github.com/samosvalishe/turn-proxy-android>** — Material 3
+   UI, авто-апдейты, Kotlin. Любимый автора cacggghp.
+2. **<https://github.com/MYSOREZ/vk-turn-proxy-android>** — простой клиент.
+3. **<https://github.com/kiper292/wireguard-turn-android>** — интегрирован
+   в WireGuard (одно приложение).
+
+Установка — APK из Releases, разрешить установку из неизвестных
+источников.
 
 ---
 
@@ -152,18 +135,19 @@ brew install --cask android-studio
 После того как клиент подключён:
 
 ```bash
-# 1. На клиенте: проверить что внешний IP — это vpnd.io-нода
+# 1. На клиенте: внешний IP должен быть от vpnd.io-ноды
 curl https://api.ipify.org
-# ожидаем IP, отличный от 194.87.99.207 и от мобильного оператора
+# ожидаем IP ноды vpnd.io (ch-3-tun.vpnd.io / uk-2 / au-1 — текущая
+# из make status), не 194.87.99.207 и не мобильный.
 
-# 2. На клиенте: проверить что доступ к VPS-у работает
-ssh root@10.66.66.1   # внутренний адрес vpn1 в wdtt0-сети
-# ожидаем sshd на vpn1
+# 2. На клиенте: доступ к VPS-сети
+ping 10.66.66.1   # это wg1 на vpn1
+ssh root@10.66.66.1   # если хочется SSH через туннель
 
-# 3. На сервере (через ssh): убедиться что WDTT-сессия пришла
+# 3. На сервере (через ssh): проверка handshake
 ssh root@194.87.99.207
-ip addr show wdtt0
-journalctl -u wdtt-server -n 50
+wg show wg1
+journalctl -u vk-turn-proxy -n 20
 ```
 
 ---
@@ -172,32 +156,40 @@ journalctl -u wdtt-server -n 50
 
 | Симптом | Где смотреть |
 |---|---|
-| Подключение зависает на «Получение кредов» | звонок VK закрыт / хеш мёртв — пересоздай |
+| Подключение зависает на «Получение кредов» | VK-звонок закрыт / хеш мёртв — пересоздай |
 | Капча в бесконечном цикле | переключи на WebView-режим (ручной слайдер) |
-| `Quota Exceeded` (486) | VK-кредиты протухли, клиент сделает auto-refresh; если не помогает — пересоздай хеш |
-| `journalctl -u wdtt-server` показывает `connection refused` от 56001 | wdtt-server не смог поднять wdtt0; проверь capabilities в systemd-юните |
-| iPhone подключился, но интернета нет | TPROXY-роль не подхватила wdtt0; проверь `nft list table inet vpn_tproxy` — там должна быть строка про `iifname "wdtt0"` |
-| Скорость 0 | UDP/56000 заблокирован у vps-провайдера или у мобильного оператора. Проверь firewall RuVDS-панели |
+| `Quota Exceeded` (486) от TURN | VK-кредиты протухли, клиент сам ротирует; если не помогает — пересоздай хеш |
+| `journalctl -u vk-turn-proxy` показывает `connection refused` от 51821 | wg1 не поднялся — `systemctl status wg-quick@wg1` |
+| Клиент подключился, но интернета нет | TPROXY не подхватил wg1; проверь `nft list table inet vpn_tproxy` — должна быть строка про `iifname "wg1"` |
+| Скорость 0 | UDP/56000 заблокирован у RuVDS или на стороне мобильного оператора (даже в VK CDN — фильтр по портам) |
 
 ---
 
 ## Безопасность
 
-- Master-пароль `vault_wdtt_master_password` — единственная защита от
-  чужих коннектов на 56000/udp. Даже зная IP сервера, без пароля
-  никто не сможет получить WG-конфиг через `GETCONF`.
-- nft-фильтр в `roles/wdtt/tasks/main.yml` дополнительно ограничивает
-  входящие коннекты только из VK CDN-сетей. Если кто-то попадёт по
-  серверу не через VK — DTLS-handshake даже не начнётся.
-- `InsecureSkipVerify` в DTLS — это by design (self-signed cert на
-  сервере), но это значит MITM на участке `client ↔ VK relay ↔ vpn1`
-  возможен. Доверие держится на пароле — поэтому он должен быть
-  длинный и неугадываемый.
+- **Master-пароля нет.** Аутентификация — только через WG (пары
+  ключей + опционально PSK). Если кто-то получит твой WG `peer.conf`
+  и поднимет его на своём устройстве — у него будет доступ. Не теряй
+  `.local-peers/wdtt/*.conf`.
+- **51821/udp на vpn1 не достижим снаружи** — закрыт nftables-DROP'ом
+  (`iifname eth0 udp dport 51821 drop` в `wdtt_input`). Только через
+  локальный `vk-turn-proxy` на 127.0.0.1.
+- **56000/udp принимает только от VK CDN-сетей** (`set vk_cdn_v4`
+  в `wdtt_input`). Open-internet сканеры на 56000 получат drop.
+- **InsecureSkipVerify в DTLS** — это by design (self-signed), но это
+  значит MITM на участке `client ↔ VK relay ↔ vpn1` теоретически
+  возможен. WG-handshake поверх DTLS снимает эту проблему: даже
+  если кто-то проксирует пакеты, без приватного ключа клиента
+  валидной WG-сессии не будет.
 
 ---
 
 ## Ссылки
 
-- Анализ архитектуры WDTT: [`docs/wdtt-analysis.md`](./wdtt-analysis.md)
+- Upstream сервер+клиент: <https://github.com/cacggghp/vk-turn-proxy>
+- Релиз сервера: <https://github.com/cacggghp/vk-turn-proxy/releases>
+- iOS клиент: <https://github.com/nullcstring/turnbridge>
+- macOS клиент: <https://github.com/denny4-user/vk-turn-proxy-macos-gui>
+- Android клиент: <https://github.com/samosvalishe/turn-proxy-android>
+- Историческая версия архитектуры (amurcanov): [`docs/wdtt-analysis.md`](./wdtt-analysis.md)
 - Серверная роль: [`ansible/roles/wdtt/`](../ansible/roles/wdtt/)
-- Оригинальный (Android) проект: <https://github.com/amurcanov/proxy-turn-vk-android>

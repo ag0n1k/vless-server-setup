@@ -1,5 +1,21 @@
 # WDTT (proxy-turn-vk-android) — анализ и инструкция
 
+> ⚠️ **UPDATE 2026-05-06.** Этот документ описывает архитектуру
+> `amurcanov/proxy-turn-vk-android` (Android-клиент с встроенным сервером).
+> Реальный upstream WDTT-семейства — **`cacggghp/vk-turn-proxy`** (см.
+> `docs/wdtt-clients.md`). У cacggghp архитектура серверной части
+> заметно проще: server — обычный UDP-прокси `DTLS:56000 → 127.0.0.1:WG_PORT`,
+> без master-пароля, без application-протокола `GETCONF`, без внутреннего
+> WG-интерфейса под управлением сервера. WG поднимается отдельным
+> `wg-quick@wg1` инстансом, server лишь распаковывает DTLS-пакеты в
+> него.
+>
+> Рабочая схема на vpn1 — именно cacggghp-вариант (`ansible/roles/wdtt/`),
+> а описание ниже остаётся как историческое исследование amurcanov-форка
+> и его специфичных решений (бесшовная ротация VK-кредов, дисптчер по
+> воркерам, application-протокол `GETCONF`). Идеи про DPI-маскировку,
+> VK-инфру и слабые места — universally применимы и к cacggghp.
+
 > Проект: https://github.com/amurcanov/proxy-turn-vk-android
 > Автор: amurcanov
 > Лицензия: GPL-3.0

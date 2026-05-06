@@ -1,0 +1,24 @@
+# {{ ansible_managed }}
+# Второй WG-интерфейс под VK-TURN-туннель. Снаружи 51821 закрыт
+# nftables-фильтром (см. roles/wdtt/tasks/main.yml), доступ только
+# через vk-turn-proxy на 127.0.0.1:51821.
+
+[Interface]
+Address    = {{ wdtt_wg_server_addr }}
+ListenPort = {{ wdtt_wg_port }}
+PrivateKey = {{ wdtt_wg_server_priv }}
+
+{% for peer in wdtt_peers if peer.state | default('present') == 'present' %}
+[Peer]
+# {{ peer.name }}{% if peer.note is defined %} — {{ peer.note }}{% endif %}
+
+PublicKey  = {{ peer.pubkey }}
+{% if _wdtt_psk_map[peer.pubkey] is defined %}
+PresharedKey = {{ _wdtt_psk_map[peer.pubkey] }}
+{% endif %}
+AllowedIPs = {{ peer.allowed_ips | join(', ') }}
+{% if peer.persistent_keepalive is defined %}
+PersistentKeepalive = {{ peer.persistent_keepalive }}
+{% endif %}
+
+{% endfor %}

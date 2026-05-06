@@ -1,0 +1,27 @@
+[Unit]
+Description=VK Turn Proxy (cacggghp/vk-turn-proxy {{ wdtt_release_version }})
+After=network-online.target wg-quick@{{ wdtt_wg_iface }}.service
+Wants=network-online.target
+Requires=wg-quick@{{ wdtt_wg_iface }}.service
+
+[Service]
+Type=simple
+ExecStart={{ vkturn_server_bin }} -listen {{ vkturn_listen }} -connect 127.0.0.1:{{ wdtt_wg_port }}
+KillMode=process
+Restart=always
+RestartSec=5
+User=nobody
+Group=nogroup
+StandardOutput=append:{{ vkturn_log_dir }}/vk-turn-proxy.log
+StandardError=append:{{ vkturn_log_dir }}/vk-turn-proxy_error.log
+SyslogIdentifier=vk-turn-proxy
+
+# Никакого CAP_NET_ADMIN — это просто UDP-прокси.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ vkturn_log_dir }}
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

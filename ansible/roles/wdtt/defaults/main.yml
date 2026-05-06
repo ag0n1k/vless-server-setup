@@ -1,53 +1,46 @@
 ---
 # ──────────────────────────────────────────────────────────────────────
-# WDTT-сервер: DTLS-эндпойнт (UDP/56000) + внутренний WG (UDP/56001) на
-# интерфейсе wdtt0 (10.66.66.0/24).
+# Архитектура (upstream cacggghp/vk-turn-proxy v1.8.x):
 #
-# Версия 1.0.6/1.1.0 (WG + DTLS, под VK-call камуфляж) — рекомендуется
-# для жёстких белых списков. Версия 1.1.4 уже SOCKS5+KCP, без DTLS-
-# камуфляжа, для жёсткого белого списка по IP VK она не подходит,
-# поэтому фиксируем 1.1.0.
+#   [VK TURN]──DTLS──> 0.0.0.0:56000 (vk-turn-proxy server)
+#                         │
+#                         ▼ UDP 127.0.0.1:51821
+#                      [wg1 интерфейс на vpn1]
+#                         │
+#                         ▼ tproxy → sing-box → vpnd.io
+#
+# Никаких master-паролей: аутентификация — VK TURN-creds на стороне
+# клиента (выводятся из ссылки на групповой VK-звонок). Сервер просто
+# распаковывает DTLS и форвардит UDP в локальный WG.
 # ──────────────────────────────────────────────────────────────────────
 
-# Способ доставки бинаря на сервер:
-#   wdtt_server_local_path  — путь к собранному локально бинарю
-#                             (`make build-wdtt` кладёт сюда)
-#   wdtt_server_binary_url  — альтернатива: скачать с http(s)
-#                             (если сервер собирался не на твоей машине)
-# Хотя бы один должен быть задан. Если оба — берётся local_path.
-#
-# Версия 1.0.6/1.1.0 (WG + DTLS, под VK-call камуфляж) — рекомендуется
-# для жёстких белых списков. Версия 1.1.4 уже SOCKS5+KCP, без DTLS-
-# камуфляжа, поэтому фиксируем 1.1.0.
-wdtt_version: "1.1.0"
-wdtt_server_local_path: "{{ playbook_dir }}/../../.local/wdtt-server"
-wdtt_server_binary_url: ""
-wdtt_server_binary_sha256: ""     # sha256 для проверки (опционально для local_path)
+# Источник бинаря — три варианта (по убыванию приоритета):
+#   1) wdtt_server_local_path — сюда `make build-wdtt` качает release
+#   2) wdtt_server_binary_url — скачать с http(s)
+#   3) ничего не задано → роль валится pre-flight'ом
+wdtt_release_version: "v1.8.3"
+wdtt_server_local_path: "{{ playbook_dir }}/../../.local/vk-turn-proxy"
+wdtt_server_binary_url: "https://github.com/cacggghp/vk-turn-proxy/releases/download/{{ wdtt_release_version }}/server-linux-amd64"
+wdtt_server_binary_sha256: ""     # опционально; заполни sha256 для checksum-проверки
 
-wdtt_install_dir: /usr/local/bin
-wdtt_server_bin: /usr/local/bin/wdtt-server
-wdtt_state_dir: /var/lib/wdtt
-wdtt_log_dir: /var/log/wdtt
+# Server-side
+vkturn_install_dir: /usr/local/bin
+vkturn_server_bin: /usr/local/bin/vk-turn-proxy
+vkturn_log_dir: /var/log/vk-turn-proxy
+vkturn_listen: "0.0.0.0:{{ wdtt_external_port }}"
+vkturn_external_port: 56000
 
-# Внешний DTLS endpoint
+# Внутренний WG (отдельный от существующего wg0). vpn1 будет иметь
+# два WG-интерфейса:
+#   wg0  → 10.188.0.0/24, listen 51820, site-to-site (giga, hopper)
+#   wg1  → 10.66.66.0/24, listen 51821 (только локально), для VK-туннеля
+# vk-turn-proxy подключается на 127.0.0.1:51821.
+wdtt_wg_iface: wg1
+wdtt_wg_port: 51821
+wdtt_wg_subnet: 10.66.66.0/24
+wdtt_wg_server_addr: 10.66.66.1/24
+wdtt_wg_server_priv_path: /etc/wireguard/wg1.key
+wdtt_wg_server_pub_path: /etc/wireguard/wg1.key.pub
+
+# Внешний DTLS-эндпойнт (сюда подключаются клиенты через VK TURN)
 wdtt_external_port: 56000
-
-# Внутренний WG (между wdtt-server и wdtt0)
-wdtt_internal_port: 56001
-wdtt_iface: wdtt0
-wdtt_subnet: 10.66.66.0/24
-wdtt_server_addr: 10.66.66.1/24
-
-# Пароли:
-#  - wdtt_master_password = vault_wdtt_master_password (главный, из vault)
-#  - per-client passwords  = vault_wdtt_client_passwords (map cn → password)
-# Список клиентов и их состояний — в state/wdtt_clients.yml.
-
-# Флаги для wdtt-server (TODO: уточнить из --help бинаря после первого apply).
-# Документация автора скудная, поэтому ниже — best-guess по wdtt-analysis.md.
-wdtt_server_args: >-
-  -listen 0.0.0.0:{{ wdtt_external_port }}
-  -wg-port {{ wdtt_internal_port }}
-  -wg-iface {{ wdtt_iface }}
-  -wg-subnet {{ wdtt_subnet }}
-  -password-file {{ wdtt_state_dir }}/master.password

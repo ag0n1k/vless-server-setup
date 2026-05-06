@@ -1,0 +1,102 @@
+---
+# Сгенерировать новый WDTT-пир (= WG-пир на wg1, 10.66.66.0/24).
+# Ключи генерируются локально, на сервер уезжает только pubkey.
+# Возвращает client.conf для скачивания на устройство.
+#
+# Вызов:
+#   ansible-playbook add-wdtt-peer.yml -e name=myiphone -e wg_ip=10.66.66.10
+
+- name: Add WDTT peer (wg1)
+  hosts: localhost
+  gather_facts: false
+  vars:
+    name: ""
+    wg_ip: ""
+    out_dir: "{{ playbook_dir }}/../../.local-peers/wdtt"
+    # Endpoint в WG-конфиге клиента — это локальный listener vk-turn-proxy
+    # на стороне устройства. По соглашению cacggghp README: 127.0.0.1:9000.
+    vkturn_client_listen: "127.0.0.1:9000"
+
+  tasks:
+    - name: Валидация
+      ansible.builtin.assert:
+        that:
+          - name | length > 0
+          - wg_ip | length > 0
+        fail_msg: "Нужны -e name=<имя> -e wg_ip=<10.66.66.X>"
+
+    - name: Каталог для ключей
+      ansible.builtin.file: { path: "{{ out_dir }}", state: directory, mode: "0700" }
+
+    - name: Сгенерировать priv/pub/PSK
+      ansible.builtin.shell: |
+        set -e
+        umask 077
+        wg genkey | tee {{ out_dir }}/{{ name }}.key | wg pubkey > {{ out_dir }}/{{ name }}.key.pub
+        wg genpsk > {{ out_dir }}/{{ name }}.psk
+      args:
+        creates: "{{ out_dir }}/{{ name }}.key"
+
+    - name: Прочитать сгенерированное
+      ansible.builtin.slurp: { src: "{{ item }}" }
+      register: _peer_slurped
+      loop:
+        - "{{ out_dir }}/{{ name }}.key"
+        - "{{ out_dir }}/{{ name }}.key.pub"
+        - "{{ out_dir }}/{{ name }}.psk"
+      no_log: true
+
+    - ansible.builtin.set_fact:
+        peer_priv: "{{ _peer_slurped.results[0].content | b64decode | trim }}"
+        peer_pub:  "{{ _peer_slurped.results[1].content | b64decode | trim }}"
+        peer_psk:  "{{ _peer_slurped.results[2].content | b64decode | trim }}"
+      no_log: true
+
+    - name: Прочитать pubkey wg1-сервера из host_vars (если задан)
+      ansible.builtin.set_fact:
+        wg1_server_pub: "{{ hostvars['vpn1'].wdtt_wg_server_pub | default('<pubkey wg1 — посмотри cat /etc/wireguard/wg1.key.pub на vpn1>') }}"
+
+    - name: Сохранить клиентский WG .conf
+      ansible.builtin.copy:
+        dest: "{{ out_dir }}/{{ name }}.conf"
+        mode: "0600"
+        content: |
+          # WireGuard клиент для VK-TURN-туннеля.
+          # Endpoint = {{ vkturn_client_listen }} — это ЛОКАЛЬНЫЙ listener
+          # клиентского vk-turn-proxy / форка. WG-туннель не идёт прямо в
+          # интернет, он сначала попадает в vk-turn-proxy, который
+          # инкапсулирует его в DTLS+TURN и шлёт через VK CDN на vpn1:56000.
+          [Interface]
+          PrivateKey = {{ peer_priv }}
+          Address    = {{ wg_ip }}/32
+          DNS        = 1.1.1.1
+          MTU        = 1280
+
+          [Peer]
+          PublicKey    = {{ wg1_server_pub }}
+          PresharedKey = {{ peer_psk }}
+          Endpoint     = {{ vkturn_client_listen }}
+          AllowedIPs   = 0.0.0.0/0, ::/0
+          PersistentKeepalive = 25
+      no_log: true
+
+    - name: Подсказка
+      ansible.builtin.debug:
+        msg:
+          - "── Готово ──"
+          - "WG-конфиг для устройства: {{ out_dir }}/{{ name }}.conf"
+          - ""
+          - "Дальше:"
+          - "1. В state/wdtt_peers.yml дописать запись:"
+          - "     - name: {{ name }}"
+          - "       pubkey: {{ peer_pub }}"
+          - "       allowed_ips: ['{{ wg_ip }}/32']"
+          - "       persistent_keepalive: 25"
+          - "       state: present"
+          - "2. В group_vars/all/vault.yml добавить PSK:"
+          - "     vault_wdtt_peer_psks:"
+          - "       \"{{ peer_pub }}\": \"{{ peer_psk }}\""
+          - "3. make apply  — на сервер уедет pubkey+PSK, wg-syncconf без drop сессий"
+          - "4. На устройство залить {{ name }}.conf + настроить vk-turn-proxy клиент:"
+          - "   - server endpoint: {{ hostvars['vpn1'].ansible_host }}:56000"
+          - "   - VK invite link: <ссылка на твой групповой VK-звонок>"

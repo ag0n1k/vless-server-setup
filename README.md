@@ -29,17 +29,17 @@ Ubuntu 24.04). См. `docs/wdtt-analysis.md` — отдельный анализ
 ### Первый запуск
 
 ```bash
-# 1. Собрать wdtt-server бинарь локально (нужен go)
+# 1. Скачать vk-turn-proxy бинарь (release, без сборки)
 make build-wdtt
-# → .local/wdtt-server, размер и sha256 в выводе
-.local/wdtt-server --help    # сверить флаги с roles/wdtt/defaults/main.yml
+# → .local/vk-turn-proxy ~6.8 МБ
+.local/vk-turn-proxy -h    # должно показать -listen и -connect флаги
 
 # 2. Сделать vault.yml из шаблона
 cp ansible/group_vars/all/vault.yml.example ansible/group_vars/all/vault.yml
 $EDITOR ansible/group_vars/all/vault.yml
 # Заполнить:
-#   vault_subscription_urls       — URL подписки vpnd.io (из bash_history vpn1)
-#   vault_wdtt_master_password    — make gen-password скопирует в clipboard
+#   vault_subscription_urls   — URL подписки vpnd.io
+#   vault_wdtt_peer_psks      — (опционально) PSK для WDTT-пиров
 
 # 3. Зашифровать
 echo 'мой-пароль-vault' > .vault_pass

@@ -3,10 +3,17 @@
   ansible.builtin.systemd:
     daemon_reload: true
 
-- name: restart wdtt-server
+- name: restart vk-turn-proxy
   ansible.builtin.systemd:
-    name: wdtt-server.service
+    name: vk-turn-proxy.service
     state: restarted
+
+- name: reload wg1
+  ansible.builtin.shell: |
+    set -e
+    wg syncconf {{ wdtt_wg_iface }} <(wg-quick strip {{ wdtt_wg_iface }})
+  args:
+    executable: /bin/bash
 
 - name: reload nftables
   ansible.builtin.command: nft -f /etc/nftables.conf
