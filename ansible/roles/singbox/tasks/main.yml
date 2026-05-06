@@ -8,7 +8,7 @@
       - curl
     state: present
     update_cache: true
-    cache_valid_time: 3600
+    cache_valid_time: 86400
   ignore_errors: true
   register: apt_singbox
 

@@ -1,4 +1,4 @@
-.PHONY: help check plan apply status switch refresh-nodes lint vault-edit vault-encrypt-staging facts build-wdtt gen-password
+.PHONY: help check plan plan-from apply status switch refresh-nodes lint vault-edit vault-encrypt-staging facts build-wdtt gen-password
 
 ANSIBLE       ?= ansible-playbook
 INV           ?= ansible/inventory/hosts.yml
@@ -11,7 +11,10 @@ ANSIBLE_FLAGS ?= $(if $(VAULT_PASS),--vault-password-file=$(VAULT_PASS))
 help:
 	@echo "make check            — syntax check всех playbooks"
 	@echo "make plan             — dry-run site.yml (--check --diff)"
+	@echo "make plan-from ROLES=wdtt,singbox,tproxy — dry-run только указанных ролей"
+	@echo "                        (pre_tasks с tags=always всегда запускаются)"
 	@echo "make apply            — применить site.yml (с подтверждением diff)"
+	@echo "make apply-from ROLES=wdtt,singbox,tproxy — apply только указанных ролей"
 	@echo "make status           — собрать факты и показать состояние сервисов"
 	@echo "make refresh-nodes    — обновить /etc/sing-box/nodes.json из подписки"
 	@echo "make switch INDEX=2   — переключить sing-box на ноду #2"
@@ -28,8 +31,16 @@ check:
 plan:
 	@$(ANSIBLE) ansible/playbooks/site.yml --check --diff $(ANSIBLE_FLAGS)
 
+plan-from:
+	@test -n "$(ROLES)" || (echo 'usage: make plan-from ROLES=wdtt,singbox,tproxy' >&2; exit 1)
+	@$(ANSIBLE) ansible/playbooks/site.yml --check --diff --tags 'always,$(ROLES)' $(ANSIBLE_FLAGS)
+
 apply:
 	@$(ANSIBLE) ansible/playbooks/site.yml --diff $(ANSIBLE_FLAGS)
+
+apply-from:
+	@test -n "$(ROLES)" || (echo 'usage: make apply-from ROLES=wdtt,singbox,tproxy' >&2; exit 1)
+	@$(ANSIBLE) ansible/playbooks/site.yml --diff --tags 'always,$(ROLES)' $(ANSIBLE_FLAGS)
 
 status:
 	@$(ANSIBLE) ansible/playbooks/status.yml $(ANSIBLE_FLAGS)
