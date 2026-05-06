@@ -1,0 +1,23 @@
+[Unit]
+Description=WDTT server — WG-over-DTLS via VK TURN camouflage
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={{ wdtt_server_bin }} {{ wdtt_server_args }}
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+StandardOutput=append:{{ wdtt_log_dir }}/wdtt-server.log
+StandardError=append:{{ wdtt_log_dir }}/wdtt-server.log
+
+# Sandboxing
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+# Нужен CAP_NET_ADMIN для управления интерфейсом wdtt0
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target

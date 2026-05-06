@@ -1,9 +1,80 @@
 # Checkpoint — состояние работ
 
 **Последнее обновление:** 2026-05-06
-**Последний коммит:** `6e1c291` (ansible: переход с shell-скриптов…)
-**Push:** не было, коммит только локально на `main`.
+**Последний коммит:** `7dacc93` (CHECKPOINT) → плюс новый WDTT-каркас (см. ниже)
+**Push:** не было, коммиты только локально на `main`.
 **Статус сервера 194.87.99.207:** не менялся, всё работает как было до 2026-05-05.
+
+## Дополнение от 2026-05-06: WDTT-роль готова
+
+Запрос: с iPhone/Mac заходить на vpn1 через мобильный оператор с
+**белым списком VK CDN**. Решение — параллельный стек WDTT-сервер на
+vpn1 (DTLS-эндпойнт 56000/udp + внутренний WG `wdtt0` 10.66.66.0/24).
+Трафик после туннеля попадает в TPROXY → sing-box → vpnd.io
+(как и хотел пользователь).
+
+Что добавлено в репо:
+- `ansible/roles/wdtt/` — роль с pre-flight assertions, скачиванием
+  бинаря, systemd-юнитом, nft-фильтром «только из VK CDN»
+- `ansible/state/wdtt_clients.yml` — список клиентов с per-client
+  паролями (опционально)
+- `vault.yml.example` обновлён: `vault_wdtt_master_password`,
+  `vault_wdtt_client_passwords`, `vault_wg_peer_psks`
+- `group_vars/all/vars.yml` — `tproxy_capture_ifaces` теперь включает
+  `wdtt0` (трафик автоматически попадёт в sing-box после туннеля),
+  плюс флаг `enable_wdtt: false` — роль выключена по умолчанию
+- `playbooks/site.yml` — роль `wdtt` запускается только при
+  `enable_wdtt=true`
+- `docs/wdtt-clients.md` — инструкции по iOS (anton48-форк через
+  AltStore или Apple Developer) и macOS (denny4-форк GUI или
+  sicmundu-форк CLI)
+
+Что **не сделано** и требует ручного шага перед apply:
+1. **Собрать `wdtt-server` бинарь.** amurcanov не публикует Linux-сервер
+   в Releases (только Android-app). Нужно:
+   ```bash
+   git clone https://github.com/amurcanov/proxy-turn-vk-android
+   cd proxy-turn-vk-android/server
+   go build -o wdtt-server
+   sha256sum wdtt-server
+   ```
+   Бинарь залить куда-то достижимое (S3 / свой GH-Release / просто
+   `scp` на vpn1 заранее), URL и sha256 — в `group_vars/all/vars.yml`:
+   ```yaml
+   wdtt_server_binary_url: "https://..."
+   wdtt_server_binary_sha256: "abc123..."
+   ```
+2. **Уточнить флаги `wdtt-server`.** В `defaults/main.yml` я указал
+   `wdtt_server_args` best-guess по wdtt-analysis.md. После сборки
+   бинаря запустить `./wdtt-server --help`, сверить с моими `-listen`/
+   `-wg-port`/`-wg-iface`/`-wg-subnet`/`-password-file`. Возможно
+   флаги называются иначе — поправить в роли.
+3. **Сгенерировать master-пароль:**
+   ```bash
+   openssl rand -base64 24
+   ```
+   В vault как `vault_wdtt_master_password`.
+4. **Открыть UDP 56000 в firewall RuVDS** (внешний DTLS).
+   `wdtt-internal-port` 56001 — внутренний, открывать снаружи не надо,
+   роль и не пытается.
+5. **Поставить флаг `enable_wdtt: true`** — либо в `host_vars/vpn1/vars.yml`,
+   либо передать `-e enable_wdtt=true` при `make apply`.
+
+Потенциальные проблемы которые увидим только при первом apply:
+- **iptables vs nftables.** Если внутри `wdtt-server` есть hardcoded
+  `iptables` вызовы для подъёма wdtt0 — на vpn1 это сработает через
+  legacy-shim, но добавит ещё один источник правил. После apply надо
+  проверить `iptables-save` и решить, чистить или нет.
+- **wdtt0 как WG-интерфейс.** wdtt-server поднимает его сам
+  (через netlink? через wg-quick?). Если через wg-quick —
+  `/etc/wireguard/wdtt0.conf` появится снаружи. Если через netlink —
+  интерфейс будет только в runtime, не в конфиге.
+- **TPROXY на wdtt0.** Чтобы захват сработал, интерфейс должен
+  существовать **до** того как nftables-таблица применится. Порядок
+  ролей в `site.yml`: `wdtt` идёт **до** `tproxy` — норм.
+
+Когда вернёшься к этому: сначала собрать бинарь и залить, потом
+`make plan -e enable_wdtt=true` — увидишь весь ожидаемый diff.
 
 ---
 

@@ -32,10 +32,12 @@ singbox_log_level: info
 
 # TPROXY ─────────────────────────────────────────────────────────────
 # Интерфейсы, чьи пакеты заворачиваются в sing-box (входящие).
-# По умолчанию OVPN tun0 + WG wg0 — оба в одну таблицу, без дублей.
+# tun0 — OVPN, wg0 — обычный WG, wdtt0 — WDTT-туннель через VK TURN.
+# Все три в одну nft-таблицу, без дублей.
 tproxy_capture_ifaces:
   - tun0
   - wg0
+  - wdtt0
 tproxy_fwmark: 1
 tproxy_rt_table_id: 100
 tproxy_rt_table_name: tproxy
@@ -48,6 +50,12 @@ f2b_ovpn_maxretry: 6
 f2b_ovpn_findtime: 10m
 f2b_ovpn_bantime: 6h
 f2b_ovpn_logpath: /var/log/openvpn/openvpn.log
+
+# WDTT ───────────────────────────────────────────────────────────────
+# Включается отдельным флагом — роль не запускается по умолчанию,
+# потому что требует отдельного бинаря и заполненного vault'а.
+# enable_wdtt: true — в host_vars или из CLI: -e enable_wdtt=true
+enable_wdtt: false
 
 # Common ─────────────────────────────────────────────────────────────
 sysctl_extras:

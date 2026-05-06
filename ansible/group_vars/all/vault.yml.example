@@ -15,3 +15,22 @@ vault_subscription_urls: >-
 # (опционально) Пароль для генерации новых клиентских OVPN-ключей с passphrase.
 # Если используешь nopass-режим — оставь пустым.
 vault_ovpn_client_passphrase: ""
+
+# ──────────────────────────────────────────────────────────────────────
+# WDTT (если включаешь роль wdtt в site.yml)
+# ──────────────────────────────────────────────────────────────────────
+
+# Главный пароль wdtt-server. Минимум 16 символов.
+# Сгенерировать: openssl rand -base64 24
+vault_wdtt_master_password: ""
+
+# (опционально) Per-client пароли — мап cn → password.
+# Если пусто — все клиенты ходят под master-паролем.
+vault_wdtt_client_passwords: {}
+  # myiphone: "..."
+  # mymac:    "..."
+
+# (опционально) WireGuard PSK для пиров (мап pubkey → psk).
+# Если пусто — PSK не используется (PresharedKey не вписывается в wg0.conf).
+vault_wg_peer_psks: {}
+  # "oNhNWNriK5WPshCsDIeUwcYlPHT+pHBsbZcdRXgR0nk=": "<PSK для giga>"
