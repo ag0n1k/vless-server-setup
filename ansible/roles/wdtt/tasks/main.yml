@@ -21,6 +21,7 @@
   ansible.builtin.apt:
     name: wireguard-tools
     state: present
+  tags: [apt]
 
 - name: Каталог логов vk-turn-proxy
   ansible.builtin.file:

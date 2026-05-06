@@ -3,6 +3,7 @@
   ansible.builtin.apt:
     name: fail2ban
     state: present
+  tags: [apt]
 
 - name: Каталог OpenVPN-логов (нужен до старта f2b)
   ansible.builtin.file:

@@ -3,6 +3,7 @@
   ansible.builtin.apt:
     name: wireguard
     state: present
+  tags: [apt]
 
 - name: Каталог /etc/wireguard
   ansible.builtin.file:

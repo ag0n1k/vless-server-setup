@@ -6,7 +6,9 @@ HOST          ?= vpn1
 # Если ansible.cfg задаёт vault_password_file — этого достаточно.
 # Можно переопределить через `make apply VAULT_PASS=/path/to/file`.
 VAULT_PASS    ?=
-ANSIBLE_FLAGS ?= $(if $(VAULT_PASS),--vault-password-file=$(VAULT_PASS))
+SKIP_TAGS     ?=
+ANSIBLE_FLAGS ?= $(if $(VAULT_PASS),--vault-password-file=$(VAULT_PASS)) \
+                 $(if $(SKIP_TAGS),--skip-tags=$(SKIP_TAGS))
 
 help:
 	@echo "make check            — syntax check всех playbooks"
@@ -15,6 +17,7 @@ help:
 	@echo "                        (pre_tasks с tags=always всегда запускаются)"
 	@echo "make apply            — применить site.yml (с подтверждением diff)"
 	@echo "make apply-from ROLES=wdtt,singbox,tproxy — apply только указанных ролей"
+	@echo "make apply SKIP_TAGS=apt — пропустить установку пакетов (если уже стоит)"
 	@echo "make status           — собрать факты и показать состояние сервисов"
 	@echo "make refresh-nodes    — обновить /etc/sing-box/nodes.json из подписки"
 	@echo "make switch INDEX=2   — переключить sing-box на ноду #2"

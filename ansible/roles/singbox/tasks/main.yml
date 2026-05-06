@@ -11,6 +11,7 @@
     cache_valid_time: 86400
   ignore_errors: true
   register: apt_singbox
+  tags: [apt]
 
 - name: Fallback — выкачать sing-box бинарь, если apt-пакета нет
   when: apt_singbox is failed

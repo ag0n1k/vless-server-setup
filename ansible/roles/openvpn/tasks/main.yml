@@ -5,6 +5,7 @@
       - openvpn
       - easy-rsa
     state: present
+  tags: [apt]
 
 - name: Каталоги OpenVPN
   ansible.builtin.file:
