@@ -1,7 +1,7 @@
 .PHONY: help check plan plan-from apply status switch refresh-nodes lint vault-edit vault-encrypt-staging facts build-wdtt gen-password
 
 ANSIBLE       ?= ansible-playbook
-INV           ?= ansible/inventory/hosts.yml
+INV           ?= inventory/hosts.yml
 HOST          ?= vpn1
 # Если ansible.cfg задаёт vault_password_file — этого достаточно.
 # Можно переопределить через `make apply VAULT_PASS=/path/to/file`.
@@ -29,43 +29,43 @@ help:
 	@echo "make facts            — снять и закешировать факты с боевого хоста"
 
 check:
-	@$(ANSIBLE) --syntax-check ansible/playbooks/site.yml
+	@$(ANSIBLE) --syntax-check playbooks/site.yml
 
 plan:
-	@$(ANSIBLE) ansible/playbooks/site.yml --check --diff $(ANSIBLE_FLAGS)
+	@$(ANSIBLE) playbooks/site.yml --check --diff $(ANSIBLE_FLAGS)
 
 plan-from:
 	@test -n "$(ROLES)" || (echo 'usage: make plan-from ROLES=wdtt,singbox,tproxy' >&2; exit 1)
-	@$(ANSIBLE) ansible/playbooks/site.yml --check --diff --tags 'always,$(ROLES)' $(ANSIBLE_FLAGS)
+	@$(ANSIBLE) playbooks/site.yml --check --diff --tags 'always,$(ROLES)' $(ANSIBLE_FLAGS)
 
 apply:
-	@$(ANSIBLE) ansible/playbooks/site.yml --diff $(ANSIBLE_FLAGS)
+	@$(ANSIBLE) playbooks/site.yml --diff $(ANSIBLE_FLAGS)
 
 apply-from:
 	@test -n "$(ROLES)" || (echo 'usage: make apply-from ROLES=wdtt,singbox,tproxy' >&2; exit 1)
-	@$(ANSIBLE) ansible/playbooks/site.yml --diff --tags 'always,$(ROLES)' $(ANSIBLE_FLAGS)
+	@$(ANSIBLE) playbooks/site.yml --diff --tags 'always,$(ROLES)' $(ANSIBLE_FLAGS)
 
 status:
-	@$(ANSIBLE) ansible/playbooks/status.yml $(ANSIBLE_FLAGS)
+	@$(ANSIBLE) playbooks/status.yml $(ANSIBLE_FLAGS)
 
 refresh-nodes:
-	@$(ANSIBLE) ansible/playbooks/refresh-nodes.yml $(ANSIBLE_FLAGS)
+	@$(ANSIBLE) playbooks/refresh-nodes.yml $(ANSIBLE_FLAGS)
 
 switch:
-	@$(ANSIBLE) ansible/playbooks/switch-node.yml \
+	@$(ANSIBLE) playbooks/switch-node.yml \
 		-e "switch_mode=$(if $(INDEX),index,$(if $(NAME),name,$(if $(NEXT),next,first)))" \
 		-e "switch_index=$(INDEX)" \
 		-e "switch_name=$(NAME)" \
 		$(ANSIBLE_FLAGS)
 
 lint:
-	@command -v ansible-lint >/dev/null && ansible-lint ansible/playbooks/site.yml || echo "ansible-lint not installed"
+	@command -v ansible-lint >/dev/null && ansible-lint playbooks/site.yml || echo "ansible-lint not installed"
 
 vault-edit:
-	@ansible-vault edit ansible/inventory/group_vars/all/vault.yml $(if $(VAULT_PASS),--vault-password-file=$(VAULT_PASS))
+	@ansible-vault edit inventory/group_vars/all/vault.yml $(if $(VAULT_PASS),--vault-password-file=$(VAULT_PASS))
 
 facts:
-	@$(ANSIBLE) ansible/playbooks/status.yml --tags facts $(ANSIBLE_FLAGS)
+	@$(ANSIBLE) playbooks/status.yml --tags facts $(ANSIBLE_FLAGS)
 
 build-wdtt:
 	@bash scripts/build-wdtt-server.sh $(VERSION)
