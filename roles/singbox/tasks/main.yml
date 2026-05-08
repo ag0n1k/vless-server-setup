@@ -252,8 +252,18 @@
     path: "{{ sb_cfg }}"
   register: _sb_cfg_stat
 
-- name: Сгенерировать config.json из текущей ноды (если конфига нет)
-  when: not _sb_cfg_stat.stat.exists
+# apt-пакет sing-box ставит дефолтный config.json (shadowsocks-сервер на :8080),
+# в нём нет outbound с tag=proxy. Это надёжный признак "не наш конфиг" —
+# тогда регенерируем из nodes.json[0]. Иначе patch'аем существующий.
+- name: Проверить — наша ли это конфигурация (outbound tag=proxy?)
+  ansible.builtin.command: jq -e '.outbounds[]? | select(.tag == "proxy")' {{ sb_cfg }}
+  register: _sb_cfg_is_ours
+  failed_when: false
+  changed_when: false
+  when: _sb_cfg_stat.stat.exists
+
+- name: Сгенерировать config.json из текущей ноды (если конфига нет или он не наш)
+  when: (not _sb_cfg_stat.stat.exists) or (_sb_cfg_is_ours.rc | default(1) != 0)
   block:
     - name: Прочитать nodes.json
       ansible.builtin.slurp:
@@ -266,6 +276,7 @@
       ansible.builtin.command: >-
         /usr/local/lib/sb_config_gen.py
         '{{ _node0 }}' '{{ sb_cfg }}' {{ singbox_socks_port }} {{ singbox_tproxy_port }} {{ singbox_log_level }}
+      notify: restart sing-box
 
 - name: Обеспечить tproxy-inbound в существующем config.json
   ansible.builtin.command: |
