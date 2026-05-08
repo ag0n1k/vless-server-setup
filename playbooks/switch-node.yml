@@ -8,7 +8,7 @@
 #   ansible-playbook switch-node.yml -e switch_mode=random
 
 - name: Switch sing-box node
-  hosts: vpn1
+  hosts: "{{ target | default('all') }}"
   become: true
   gather_facts: true
   vars:

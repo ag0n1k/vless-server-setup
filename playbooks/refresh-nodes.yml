@@ -1,6 +1,6 @@
 ---
 - name: Обновить sing-box nodes.json из подписок
-  hosts: vpn1
+  hosts: "{{ target | default('all') }}"
   become: true
   gather_facts: false
 

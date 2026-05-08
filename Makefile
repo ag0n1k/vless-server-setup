@@ -2,13 +2,17 @@
 
 ANSIBLE       ?= ansible-playbook
 INV           ?= inventory/hosts.yml
-HOST          ?= vpn1
+# HOST: ограничить выполнение конкретным хостом из inventory (vpn1, vpn2, ...).
+#   make apply HOST=vpn2
+# Пусто = все хосты из site.yml.
+HOST          ?=
 # Если ansible.cfg задаёт vault_password_file — этого достаточно.
 # Можно переопределить через `make apply VAULT_PASS=/path/to/file`.
 VAULT_PASS    ?=
 SKIP_TAGS     ?=
 ANSIBLE_FLAGS ?= $(if $(VAULT_PASS),--vault-password-file=$(VAULT_PASS)) \
-                 $(if $(SKIP_TAGS),--skip-tags=$(SKIP_TAGS))
+                 $(if $(SKIP_TAGS),--skip-tags=$(SKIP_TAGS)) \
+                 $(if $(HOST),-l $(HOST))
 
 help:
 	@echo "make check            — syntax check всех playbooks"
@@ -18,6 +22,7 @@ help:
 	@echo "make apply            — применить site.yml (с подтверждением diff)"
 	@echo "make apply-from ROLES=wdtt,singbox,tproxy — apply только указанных ролей"
 	@echo "make apply SKIP_TAGS=apt — пропустить установку пакетов (если уже стоит)"
+	@echo "make apply HOST=vpn2 — выполнить только на одном хосте"
 	@echo "make status           — собрать факты и показать состояние сервисов"
 	@echo "make refresh-nodes    — обновить /etc/sing-box/nodes.json из подписки"
 	@echo "make switch INDEX=2   — переключить sing-box на ноду #2"

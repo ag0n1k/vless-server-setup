@@ -5,6 +5,7 @@
 # Вызов:
 #   ansible-playbook add-wg-peer.yml -e name=phone -e wg_ip=10.188.0.10
 #   ansible-playbook add-wg-peer.yml -e name=site3 -e wg_ip=10.188.0.20 -e site_lan=192.168.3.0/24
+#   ansible-playbook add-wg-peer.yml -e name=test -e wg_ip=10.188.0.30 -e vpn_server=vpn2
 
 - name: Add WireGuard peer
   hosts: localhost
@@ -13,7 +14,9 @@
     name: ""
     wg_ip: ""
     site_lan: ""
-    out_dir: "{{ playbook_dir }}/../../.local-peers"
+    # На какой сервер цепляться (имя из inventory). По умолчанию vpn1.
+    vpn_server: vpn1
+    out_dir: "{{ playbook_dir }}/../.local-peers/{{ vpn_server }}"
 
   tasks:
     - name: Валидация
@@ -21,7 +24,8 @@
         that:
           - name | length > 0
           - wg_ip | length > 0
-        fail_msg: "Нужны -e name=<name> -e wg_ip=<ip>"
+          - vpn_server in hostvars
+        fail_msg: "Нужны -e name=<name> -e wg_ip=<ip>; vpn_server должен быть в inventory"
 
     - name: Каталог для ключей
       ansible.builtin.file: { path: "{{ out_dir }}", state: directory, mode: "0700" }
@@ -53,10 +57,11 @@
     - name: Подсказка по next steps
       ansible.builtin.debug:
         msg:
+          - "Сервер: {{ vpn_server }} ({{ hostvars[vpn_server].ansible_host }})"
           - "Pubkey пира (для state/wg_peers.yml): {{ peer_pub }}"
-          - "PSK (для group_vars/all/vault.yml: vault_wg_peer_psks[\"{{ peer_pub }}\"]): {{ peer_psk }}"
-          - "После добавления в state — запусти: make apply"
-          - "Клиентский .conf: {{ out_dir }}/{{ name }}.conf (создаётся следующей задачей)"
+          - "PSK (для vault_wg_peer_psks[\"{{ peer_pub }}\"]): {{ peer_psk }}"
+          - "После добавления в state — make apply HOST={{ vpn_server }}"
+          - "Клиентский .conf: {{ out_dir }}/{{ name }}.conf"
 
     - name: Сохранить клиентский .conf
       ansible.builtin.copy:
@@ -69,9 +74,9 @@
           DNS        = 1.1.1.1
 
           [Peer]
-          PublicKey    = {{ hostvars['vpn1'].wg_server_pubkey }}
+          PublicKey    = {{ hostvars[vpn_server].wg_server_pubkey }}
           PresharedKey = {{ peer_psk }}
-          Endpoint     = {{ hostvars['vpn1'].ansible_host }}:51820
+          Endpoint     = {{ hostvars[vpn_server].ansible_host }}:51820
           AllowedIPs   = 10.188.0.0/24{% if site_lan | length > 0 %}, {{ site_lan }}{% endif %}
 
           PersistentKeepalive = 25

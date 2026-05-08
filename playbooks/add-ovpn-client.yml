@@ -5,7 +5,7 @@
 #   ansible-playbook add-ovpn-client.yml -e cn=router3 -e fixed_ip=10.88.0.20 -e iroute=192.168.3.0/24
 
 - name: Add OpenVPN client
-  hosts: vpn1
+  hosts: "{{ target | default('all') }}"
   become: true
   gather_facts: true
   vars:

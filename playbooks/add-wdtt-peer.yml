@@ -5,6 +5,7 @@
 #
 # Вызов:
 #   ansible-playbook add-wdtt-peer.yml -e name=myiphone -e wg_ip=10.66.66.10
+#   ansible-playbook add-wdtt-peer.yml -e name=myiphone -e wg_ip=10.66.66.10 -e vpn_server=vpn2
 
 - name: Add WDTT peer (wg1)
   hosts: localhost
@@ -12,7 +13,9 @@
   vars:
     name: ""
     wg_ip: ""
-    out_dir: "{{ playbook_dir }}/../../.local-peers/wdtt"
+    # На какой сервер цепляться (имя из inventory). По умолчанию vpn1.
+    vpn_server: vpn1
+    out_dir: "{{ playbook_dir }}/../.local-peers/wdtt/{{ vpn_server }}"
     # Endpoint в WG-конфиге клиента — это локальный listener vk-turn-proxy
     # на стороне устройства. По соглашению cacggghp README: 127.0.0.1:9000.
     vkturn_client_listen: "127.0.0.1:9000"
@@ -23,7 +26,8 @@
         that:
           - name | length > 0
           - wg_ip | length > 0
-        fail_msg: "Нужны -e name=<имя> -e wg_ip=<10.66.66.X>"
+          - vpn_server in hostvars
+        fail_msg: "Нужны -e name=<имя> -e wg_ip=<10.66.66.X>; vpn_server должен быть в inventory"
 
     - name: Каталог для ключей
       ansible.builtin.file: { path: "{{ out_dir }}", state: directory, mode: "0700" }
@@ -54,7 +58,7 @@
 
     - name: Прочитать pubkey wg1-сервера из host_vars (если задан)
       ansible.builtin.set_fact:
-        wg1_server_pub: "{{ hostvars['vpn1'].wdtt_wg_server_pub | default('<pubkey wg1 — посмотри cat /etc/wireguard/wg1.key.pub на vpn1>') }}"
+        wg1_server_pub: "{{ hostvars[vpn_server].wdtt_wg_server_pub | default('<pubkey wg1 — посмотри cat /etc/wireguard/wg1.key.pub на ' + vpn_server + '>') }}"
 
     - name: Сохранить клиентский WG .conf
       ansible.builtin.copy:
@@ -65,7 +69,7 @@
           # Endpoint = {{ vkturn_client_listen }} — это ЛОКАЛЬНЫЙ listener
           # клиентского vk-turn-proxy / форка. WG-туннель не идёт прямо в
           # интернет, он сначала попадает в vk-turn-proxy, который
-          # инкапсулирует его в DTLS+TURN и шлёт через VK CDN на vpn1:56000.
+          # инкапсулирует его в DTLS+TURN и шлёт через VK CDN на {{ vpn_server }}:56000.
           [Interface]
           PrivateKey = {{ peer_priv }}
           Address    = {{ wg_ip }}/32
@@ -84,6 +88,7 @@
       ansible.builtin.debug:
         msg:
           - "── Готово ──"
+          - "Сервер: {{ vpn_server }} ({{ hostvars[vpn_server].ansible_host }})"
           - "WG-конфиг для устройства: {{ out_dir }}/{{ name }}.conf"
           - ""
           - "Дальше:"
@@ -93,10 +98,10 @@
           - "       allowed_ips: ['{{ wg_ip }}/32']"
           - "       persistent_keepalive: 25"
           - "       state: present"
-          - "2. В group_vars/all/vault.yml добавить PSK:"
+          - "2. В vault.yml добавить PSK:"
           - "     vault_wdtt_peer_psks:"
           - "       \"{{ peer_pub }}\": \"{{ peer_psk }}\""
-          - "3. make apply  — на сервер уедет pubkey+PSK, wg-syncconf без drop сессий"
+          - "3. make apply HOST={{ vpn_server }}  — на сервер уедет pubkey+PSK"
           - "4. На устройство залить {{ name }}.conf + настроить vk-turn-proxy клиент:"
-          - "   - server endpoint: {{ hostvars['vpn1'].ansible_host }}:56000"
+          - "   - server endpoint: {{ hostvars[vpn_server].ansible_host }}:56000"
           - "   - VK invite link: <ссылка на твой групповой VK-звонок>"
