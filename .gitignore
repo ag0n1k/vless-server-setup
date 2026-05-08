@@ -6,6 +6,9 @@
 .vault_pass
 inventory/group_vars/all/vault.yml
 inventory/host_vars/*/vault.yml
+.cache/
+facts/
+*.log
 ansible/.cache/
 ansible/facts/
 ansible/*.log
