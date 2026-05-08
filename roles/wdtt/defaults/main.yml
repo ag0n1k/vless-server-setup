@@ -19,7 +19,7 @@
 #   2) wdtt_server_binary_url — скачать с http(s)
 #   3) ничего не задано → роль валится pre-flight'ом
 wdtt_release_version: "v1.8.3"
-wdtt_server_local_path: "{{ playbook_dir }}/../../.local/vk-turn-proxy"
+wdtt_server_local_path: "{{ playbook_dir }}/../.local/vk-turn-proxy"
 wdtt_server_binary_url: "https://github.com/cacggghp/vk-turn-proxy/releases/download/{{ wdtt_release_version }}/server-linux-amd64"
 wdtt_server_binary_sha256: ""     # опционально; заполни sha256 для checksum-проверки
 

@@ -1,6 +1,6 @@
 ---
 - name: Configure VPN gateway (OpenVPN + WireGuard + sing-box + TPROXY)
-  hosts: vpn1
+  hosts: vpn2
   become: true
   gather_facts: true
 
@@ -26,17 +26,17 @@
       tags: [always]
 
   roles:
-    - role: common
-      tags: [common]
-    - role: fail2ban
-      tags: [fail2ban]
-    - role: openvpn
-      tags: [openvpn]
-    - role: wireguard
-      tags: [wireguard]
-    - role: wdtt
-      tags: [wdtt]
-      when: enable_wdtt | default(true) | bool
+#    - role: common
+#      tags: [common]
+#    - role: fail2ban
+#      tags: [fail2ban]
+#    - role: openvpn
+#      tags: [openvpn]
+#    - role: wireguard
+#      tags: [wireguard]
+#    - role: wdtt
+#      tags: [wdtt]
+#      when: enable_wdtt | default(true) | bool
     - role: singbox
       tags: [singbox]
     - role: tproxy

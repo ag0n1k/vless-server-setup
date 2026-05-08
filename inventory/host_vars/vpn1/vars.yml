@@ -1,14 +1,14 @@
 ---
 # Имя хоста для логов/комментариев в шаблонах.
-inventory_hostname_label: vpn1
+inventory_hostname_label: vpn2
 
 # Публичный endpoint, используемый клиентами OVPN/WG. По умолчанию равен ansible_host.
 server_public_ip: "{{ ansible_host }}"
 
 # Имя WAN-интерфейса. Если пусто — определится автоматически (роль common).
-wan_iface: eth0
+#wan_iface: eth0
 
 # Public key WG-сервера (известно из `wg show wg0 public-key`).
 # Используется только для выдачи новым WG-клиентам — НЕ как источник правды.
 # Реальная истина — приватник в /etc/wireguard/server.key на сервере.
-wg_server_pubkey: lNkedeCaSk1zpvqAwluV17BvwboN8Ois1s3xXz8UyzE=
+#wg_server_pubkey: lNkedeCaSk1zpvqAwluV17BvwboN8Ois1s3xXz8UyzE=

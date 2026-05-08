@@ -1,5 +1,36 @@
 ---
-- name: Установить sing-box (apt-репо SagerNet) и зависимости парсера
+- name: Каталог /etc/apt/keyrings (для SagerNet GPG)
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+  tags: [apt]
+
+- name: Скачать GPG-ключ SagerNet
+  ansible.builtin.get_url:
+    url: https://sing-box.app/gpg.key
+    dest: /etc/apt/keyrings/sagernet.asc
+    mode: "0644"
+    force: false
+  register: _sagernet_key
+  tags: [apt]
+
+- name: Прописать SagerNet apt-репо
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/sagernet.list
+    mode: "0644"
+    content: |
+      deb [arch={{ 'arm64' if ansible_architecture in ['aarch64','arm64'] else 'amd64' }} signed-by=/etc/apt/keyrings/sagernet.asc] https://deb.sagernet.org/ * *
+  register: _sagernet_repo
+  tags: [apt]
+
+- name: apt update после изменения репо
+  ansible.builtin.apt:
+    update_cache: true
+  when: _sagernet_key.changed or _sagernet_repo.changed
+  tags: [apt]
+
+- name: Установить sing-box и зависимости парсера
   ansible.builtin.apt:
     name:
       - sing-box
@@ -7,35 +38,8 @@
       - jq
       - curl
     state: present
-    update_cache: true
     cache_valid_time: 86400
-  ignore_errors: true
-  register: apt_singbox
   tags: [apt]
-
-- name: Fallback — выкачать sing-box бинарь, если apt-пакета нет
-  when: apt_singbox is failed
-  block:
-    - name: Узнать архитектуру
-      ansible.builtin.set_fact:
-        _sb_arch: "{{ 'amd64' if ansible_architecture in ['x86_64','amd64'] else 'arm64' }}"
-    - name: Получить latest tag sing-box
-      ansible.builtin.uri:
-        url: https://api.github.com/repos/SagerNet/sing-box/releases/latest
-        return_content: true
-      register: _sb_release
-    - name: Найти tar.gz asset
-      ansible.builtin.set_fact:
-        _sb_asset: "{{ _sb_release.json.assets | selectattr('name','match','sing-box-.*-linux-' ~ _sb_arch ~ '\\.tar\\.gz$') | map(attribute='browser_download_url') | first }}"
-    - name: Скачать и распаковать
-      ansible.builtin.unarchive:
-        src: "{{ _sb_asset }}"
-        dest: /tmp/
-        remote_src: true
-    - name: Установить бинарь
-      ansible.builtin.shell: install -m 0755 $(find /tmp -type f -name sing-box -executable | head -n1) /usr/local/bin/sing-box
-      args:
-        creates: /usr/local/bin/sing-box
 
 - name: Каталог конфига sing-box
   ansible.builtin.file:

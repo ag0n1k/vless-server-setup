@@ -192,4 +192,4 @@ journalctl -u vk-turn-proxy -n 20
 - macOS клиент: <https://github.com/denny4-user/vk-turn-proxy-macos-gui>
 - Android клиент: <https://github.com/samosvalishe/turn-proxy-android>
 - Историческая версия архитектуры (amurcanov): [`docs/wdtt-analysis.md`](./wdtt-analysis.md)
-- Серверная роль: [`ansible/roles/wdtt/`](../ansible/roles/wdtt/)
+- Серверная роль: [`ansible/roles/wdtt/`](../roles/wdtt/)
