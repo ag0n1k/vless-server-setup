@@ -1,0 +1,15 @@
+---
+# WireGuard-пиры на wg0 (10.188.0.0/24) сервера vpn2.
+# PSK хранятся в group_vars/all/vault.yml как vault_wg_peer_psks (мап pubkey→psk).
+#
+# Пример записи:
+#   - name: phone1
+#     pubkey: <публичный ключ клиента>
+#     allowed_ips:
+#       - 10.188.0.10/32
+#     persistent_keepalive: 25
+#     state: present
+#
+# Чтобы добавить: ansible-playbook playbooks/add-wg-peer.yml -e name=<...> -e wg_ip=<...> -e vpn_server=vpn2
+
+wg_peers: []

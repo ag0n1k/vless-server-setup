@@ -1,0 +1,15 @@
+---
+# WDTT-пиры на wg1 (10.66.66.0/24) сервера vpn2 — устройства которые
+# подключаются через VK-TURN-туннель.
+#
+# Пример записи:
+#   - name: myiphone
+#     pubkey: <публичный ключ клиента>
+#     allowed_ips:
+#       - 10.66.66.10/32
+#     persistent_keepalive: 25
+#     state: present
+#
+# Чтобы добавить: ansible-playbook playbooks/add-wdtt-peer.yml -e name=<...> -e wg_ip=<...> -e vpn_server=vpn2
+
+wdtt_peers: []

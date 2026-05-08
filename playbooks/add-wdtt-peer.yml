@@ -92,7 +92,7 @@
           - "WG-конфиг для устройства: {{ out_dir }}/{{ name }}.conf"
           - ""
           - "Дальше:"
-          - "1. В state/wdtt_peers.yml дописать запись:"
+          - "1. В inventory/host_vars/{{ vpn_server }}/wdtt_peers.yml дописать запись:"
           - "     - name: {{ name }}"
           - "       pubkey: {{ peer_pub }}"
           - "       allowed_ips: ['{{ wg_ip }}/32']"

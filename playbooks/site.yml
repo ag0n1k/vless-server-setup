@@ -1,18 +1,14 @@
 ---
 - name: Configure VPN gateway (OpenVPN + WireGuard + sing-box + TPROXY)
-  hosts: vpn2
+  hosts: "{{ target | default('all') }}"
   become: true
   gather_facts: true
 
-  pre_tasks:
-    - name: Загрузить state-файлы
-      ansible.builtin.include_vars:
-        file: "{{ item }}"
-      loop:
-        - "{{ playbook_dir }}/../state/ovpn_peers.yml"
-        - "{{ playbook_dir }}/../state/wg_peers.yml"
-      tags: [always]
+  # ovpn_peers, wg_peers, wdtt_peers подтягиваются автоматически из
+  # inventory/host_vars/<host>/{ovpn,wg,wdtt}_peers.yml — Ansible сам
+  # загружает host_vars при gather_facts.
 
+  pre_tasks:
     - name: Определить WAN-интерфейс если не задан
       ansible.builtin.shell: ip route show default 0.0.0.0/0 | awk '{print $5; exit}'
       register: wan_detect

@@ -67,9 +67,7 @@
     wdtt_wg_server_pub: "{{ _wg1_pub_b64.content | b64decode | trim }}"
   no_log: true
 
-- name: Загрузить state/wdtt_peers.yml
-  ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/../state/wdtt_peers.yml"
+# wdtt_peers приходит из inventory/host_vars/<host>/wdtt_peers.yml автоматически.
 
 - name: Прочитать PSK мап из vault
   ansible.builtin.set_fact:

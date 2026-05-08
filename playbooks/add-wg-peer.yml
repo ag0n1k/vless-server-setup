@@ -58,7 +58,7 @@
       ansible.builtin.debug:
         msg:
           - "Сервер: {{ vpn_server }} ({{ hostvars[vpn_server].ansible_host }})"
-          - "Pubkey пира (для state/wg_peers.yml): {{ peer_pub }}"
+          - "Pubkey пира (для inventory/host_vars/{{ vpn_server }}/wg_peers.yml): {{ peer_pub }}"
           - "PSK (для vault_wg_peer_psks[\"{{ peer_pub }}\"]): {{ peer_psk }}"
           - "После добавления в state — make apply HOST={{ vpn_server }}"
           - "Клиентский .conf: {{ out_dir }}/{{ name }}.conf"

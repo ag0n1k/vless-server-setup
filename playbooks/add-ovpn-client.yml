@@ -87,4 +87,4 @@
       ansible.builtin.debug:
         msg:
           - "Готово. Файл клиента: {{ ovpn_clients_out_dir }}/{{ cn }}.ovpn"
-          - "Не забудь добавить запись в ansible/state/ovpn_peers.yml и закоммитить."
+          - "Не забудь добавить запись в inventory/host_vars/{{ inventory_hostname }}/ovpn_peers.yml и закоммитить."

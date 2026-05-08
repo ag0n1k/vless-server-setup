@@ -1,0 +1,15 @@
+---
+# OpenVPN-клиенты на vpn2. Структура идентична host_vars/vpn1/ovpn_peers.yml.
+# Источник правды по PKI — сам сервер vpn2.
+#
+# Пример записи:
+#   - cn: client1
+#     state: present
+#     fixed_ip: 10.88.0.10        # опционально: статический IP
+#     iroute:                     # опционально: site-to-site
+#       - 192.168.10.0/24
+#     note: "комментарий"
+#
+# Чтобы добавить: ansible-playbook playbooks/add-ovpn-client.yml -e cn=<имя> -e target=vpn2
+
+ovpn_peers: []
