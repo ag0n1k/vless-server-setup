@@ -1,10 +1,18 @@
 ---
+- name: Каталог /etc/iproute2 (если ещё нет)
+  ansible.builtin.file:
+    path: "{{ tproxy_rt_tables | dirname }}"
+    state: directory
+    mode: "0755"
+
 - name: Прописать routing-таблицу tproxy в /etc/iproute2/rt_tables
   ansible.builtin.lineinfile:
     path: "{{ tproxy_rt_tables }}"
     regexp: "^\\s*\\d+\\s+{{ tproxy_rt_table_name }}\\b"
     line: "{{ tproxy_rt_table_id }} {{ tproxy_rt_table_name }}"
     state: present
+    create: true
+    mode: "0644"
 
 - name: Очистить дублирующиеся ip rule fwmark (если они накопились)
   ansible.builtin.shell: |
