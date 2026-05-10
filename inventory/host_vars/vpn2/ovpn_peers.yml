@@ -17,3 +17,9 @@ ovpn_peers:
     state: present
   - cn: iphone-ag0n1k
     state: present
+  - cn: iphone-olga
+    state: present
+  - cn: ipad-olga
+    state: present
+  - cn: ipad-mini
+    state: present
