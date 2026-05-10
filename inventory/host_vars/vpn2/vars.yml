@@ -11,4 +11,8 @@ server_public_ip: "{{ ansible_host }}"
 # Public key WG-сервера (известно из `wg show wg0 public-key`).
 # Используется только для выдачи новым WG-клиентам — НЕ как источник правды.
 # Реальная истина — приватник в /etc/wireguard/server.key на сервере.
-#wg_server_pubkey: lNkedeCaSk1zpvqAwluV17BvwboN8Ois1s3xXz8UyzE=
+wg_server_pubkey: L+F3LDK6IKZyFcHG8o5cLbi4TuM+5Blr7dmzGs0C30k=
+
+# Public key wg1-сервера (WDTT-туннель). Используется add-wdtt-peer.yml
+# для генерации клиентских конфигов.
+wdtt_wg_server_pub: 029Do1cME3DerDVIm1kU9/E1cNeSDBKwR/dZdqOnmg0=

@@ -15,3 +15,5 @@
 ovpn_peers:
   - cn: fast-hopper
     state: present
+  - cn: iphone-ag0n1k
+    state: present
