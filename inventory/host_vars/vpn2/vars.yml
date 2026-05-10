@@ -1,6 +1,6 @@
 ---
 # Имя хоста для логов/комментариев в шаблонах.
-inventory_hostname_label: vpn1
+inventory_hostname_label: vpn2
 
 # Публичный endpoint, используемый клиентами OVPN/WG. По умолчанию равен ansible_host.
 server_public_ip: "{{ ansible_host }}"

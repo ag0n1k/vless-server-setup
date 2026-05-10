@@ -13,6 +13,7 @@
       ansible.builtin.shell: ip route show default 0.0.0.0/0 | awk '{print $5; exit}'
       register: wan_detect
       changed_when: false
+      check_mode: false
       when: wan_iface is not defined or wan_iface | length == 0
       tags: [always]
 

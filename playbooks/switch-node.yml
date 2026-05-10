@@ -88,6 +88,14 @@
       ansible.builtin.set_fact:
         _node: "{{ _nodes[_new_idx | int] }}"
 
+    - name: Бэкап текущего config.json (для отката при битой ноде)
+      ansible.builtin.copy:
+        src: "{{ sb_cfg }}"
+        dest: /tmp/sing-box-config-prev.json
+        remote_src: true
+        mode: "0600"
+      changed_when: false
+
     - name: Сгенерировать новый config.json
       ansible.builtin.command: >-
         /usr/local/lib/sb_config_gen.py
@@ -104,6 +112,49 @@
         name: sing-box.service
         state: restarted
 
+    - name: Подождать пока socks5-порт sing-box ответит
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ singbox_socks_port }}"
+        timeout: 15
+
+    - name: Healthcheck — egress IP через socks5h
+      ansible.builtin.command: >-
+        curl -fsS --max-time 8
+        --proxy socks5h://127.0.0.1:{{ singbox_socks_port }}
+        https://api.ipify.org
+      register: _hc
+      changed_when: false
+      failed_when: false
+
+    - name: Решить — жива ли нода
+      ansible.builtin.set_fact:
+        _node_alive: >-
+          {{ (_hc.rc | int) == 0
+             and (_hc.stdout | trim | length) > 0
+             and (_hc.stdout | trim) != (server_public_ip | default(ansible_host)) }}
+
+    - name: Откат на предыдущий config (нода мертва)
+      when: not _node_alive
+      block:
+        - name: Восстановить предыдущий config.json
+          ansible.builtin.copy:
+            src: /tmp/sing-box-config-prev.json
+            dest: "{{ sb_cfg }}"
+            remote_src: true
+            mode: "0600"
+        - name: Перезапустить sing-box (rollback)
+          ansible.builtin.systemd:
+            name: sing-box.service
+            state: restarted
+        - name: Fail с сообщением
+          ansible.builtin.fail:
+            msg: >-
+              Нода #{{ (_new_idx | int) + 1 }} ({{ _node.label }})
+              не отвечает: curl rc={{ _hc.rc }},
+              stdout='{{ _hc.stdout | trim | default("<empty>") }}'.
+              Откат на предыдущий config выполнен.
+
     - name: Сохранить current-node.json
       ansible.builtin.copy:
         dest: "{{ sb_current }}"
@@ -114,9 +165,10 @@
             "label": {{ _node.label | to_json }},
             "server": {{ _node.server | to_json }},
             "port": {{ _node.port | int }},
-            "switched_at": "{{ ansible_date_time.iso8601 }}"
+            "switched_at": "{{ ansible_date_time.iso8601 }}",
+            "egress_ip": {{ (_hc.stdout | trim) | to_json }}
           }
 
     - name: Готово
       ansible.builtin.debug:
-        msg: "Переключено на #{{ (_new_idx | int) + 1 }}: {{ _node.label }} ({{ _node.server }}:{{ _node.port }})"
+        msg: "Переключено на #{{ (_new_idx | int) + 1 }}: {{ _node.label }} ({{ _node.server }}:{{ _node.port }}) — egress {{ _hc.stdout | trim }}"

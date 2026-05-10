@@ -70,7 +70,7 @@
     - name: Скопировать .ovpn локально
       ansible.builtin.fetch:
         src: "{{ ovpn_clients_out_dir }}/{{ cn }}.ovpn"
-        dest: "{{ playbook_dir }}/../../.local-clients/"
+        dest: "{{ playbook_dir }}/../.local-clients/"
         flat: false
 
     - name: CCD (опционально)

@@ -12,4 +12,6 @@
 #
 # Чтобы добавить: ansible-playbook playbooks/add-ovpn-client.yml -e cn=<имя> -e target=vpn2
 
-ovpn_peers: []
+ovpn_peers:
+  - cn: fast-hopper
+    state: present
