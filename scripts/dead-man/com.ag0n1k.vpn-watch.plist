@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ag0n1k.vpn-watch</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-ilc</string>
+        <string>/Users/ag0n1k/vpn-watch/check.sh</string>
+    </array>
+
+    <!-- Каждые 15 минут -->
+    <key>StartInterval</key>
+    <integer>900</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/ag0n1k/vpn-watch/log/launchd.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/ag0n1k/vpn-watch/log/launchd.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

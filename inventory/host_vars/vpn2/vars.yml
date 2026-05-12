@@ -16,3 +16,27 @@ wg_server_pubkey: L+F3LDK6IKZyFcHG8o5cLbi4TuM+5Blr7dmzGs0C30k=
 # Public key wg1-сервера (WDTT-туннель). Используется add-wdtt-peer.yml
 # для генерации клиентских конфигов.
 wdtt_wg_server_pub: 029Do1cME3DerDVIm1kU9/E1cNeSDBKwR/dZdqOnmg0=
+
+# Self-check: на vpn2 каркас в синхроне с сервером, безопасно крутить
+# периодическую проверку egress + tproxy инвариантов.
+selfcheck_enabled: true
+
+# Auto-recover: при 3 подряд egress-провалах self-check сам дёргает
+# sb_recover.py и пробует следующие ноды.
+selfcheck_auto_switch_enabled: true
+
+# Telegram-нотификации о падающих юнитах (бот @remember_be_bot, тот же что
+# и у psn-watch). Токен/chat_id — в vault_tg_token / vault_tg_chat_id.
+# OnFailure повешан через drop-in'ы на список юнитов ниже — шаблоны
+# самих юнитов не трогаем.
+notify_enabled: true
+notify_units:
+  - openvpn-server@server.service
+  - wg-quick@wg0.service
+  - wg-quick@wg1.service
+  - sing-box.service
+  - sing-box-refresh.service
+  - vk-turn-proxy.service
+  - fail2ban.service
+  - nftables.service
+  - vpn-selfcheck.service

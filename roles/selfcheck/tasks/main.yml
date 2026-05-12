@@ -1,0 +1,64 @@
+---
+# ──────────────────────────────────────────────────────────────────────
+# Self-check VPN-шлюза: ставит скрипт vpn-selfcheck.sh + systemd-таймер.
+# Проверяет egress через sing-box и инварианты TPROXY (nft/ip rule).
+# ──────────────────────────────────────────────────────────────────────
+
+- name: Установить curl (для egress-проверки через socks5h)
+  ansible.builtin.apt:
+    name: curl
+    state: present
+  tags: [apt]
+
+- name: State-каталог self-check
+  ansible.builtin.file:
+    path: "{{ selfcheck_state_dir }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Лог-файл selfcheck с rotation-friendly правами
+  ansible.builtin.file:
+    path: "{{ selfcheck_log_path }}"
+    state: touch
+    mode: "0640"
+    owner: root
+    group: adm
+  changed_when: false
+
+- name: Скрипт самопроверки
+  ansible.builtin.template:
+    src: vpn-selfcheck.sh.j2
+    dest: "{{ selfcheck_script_path }}"
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: systemd-юнит selfcheck
+  ansible.builtin.template:
+    src: vpn-selfcheck.service.j2
+    dest: "/etc/systemd/system/{{ selfcheck_unit_name }}.service"
+    mode: "0644"
+  notify:
+    - reload systemd (selfcheck)
+    - restart selfcheck timer
+
+- name: systemd-таймер selfcheck
+  ansible.builtin.template:
+    src: vpn-selfcheck.timer.j2
+    dest: "/etc/systemd/system/{{ selfcheck_unit_name }}.timer"
+    mode: "0644"
+  notify:
+    - reload systemd (selfcheck)
+    - restart selfcheck timer
+
+- name: Включить и запустить selfcheck.timer
+  ansible.builtin.systemd:
+    name: "{{ selfcheck_unit_name }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: true
+  # В --check шаблоны юнита и таймера ещё не лежат на диске → systemd
+  # не находит unit. В реальном apply отработает корректно.
+  when: not ansible_check_mode

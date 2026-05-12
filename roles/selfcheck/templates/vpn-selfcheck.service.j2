@@ -1,0 +1,16 @@
+# {{ ansible_managed }}
+[Unit]
+Description=VPN gateway self-check
+After=network-online.target sing-box.service nftables.service
+Wants=sing-box.service
+{% if selfcheck_onfailure_unit | length > 0 %}
+OnFailure={{ selfcheck_onfailure_unit }}
+{% endif %}
+
+[Service]
+Type=oneshot
+ExecStart={{ selfcheck_script_path }}
+# Лог результата в файл — журналы systemd тоже остаются
+StandardOutput=append:{{ selfcheck_log_path }}
+StandardError=append:{{ selfcheck_log_path }}
+Nice=10

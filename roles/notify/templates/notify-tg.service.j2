@@ -1,0 +1,8 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Telegram notification for failed unit %i
+
+[Service]
+Type=oneshot
+ExecStart={{ notify_script_path }} %i
+Nice=10

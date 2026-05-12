@@ -1,0 +1,19 @@
+---
+# Включить через notify_enabled: true в group_vars или host_vars.
+notify_enabled: false
+
+notify_script_path: /usr/local/sbin/notify-tg.sh
+notify_creds_path: /etc/notify-tg.env
+
+# Имя инстанс-юнита для OnFailure. Падающий юнит передаётся как %i.
+notify_template_unit: notify-tg
+
+# Юниты которым раскладываем drop-in c OnFailure=notify-tg@%n.service.
+# Пустой список → drop-in'ы не создаются. Задавай явно в host_vars/group_vars.
+notify_units: []
+
+# Сколько последних строк журналов прикладывать к сообщению.
+notify_journal_lines: 30
+
+# Tg API endpoint (можно переопределить под прокси/mirror)
+notify_tg_api: https://api.telegram.org

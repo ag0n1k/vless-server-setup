@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Отправить TG-уведомление о падении systemd-юнита.
+# Вызов: notify-tg.sh <unit-name>
+# Креды читаются из {{ notify_creds_path }} (TG_BOT_TOKEN, TG_CHAT_ID).
+set -u
+
+UNIT="${1:-unknown}"
+CREDS="{{ notify_creds_path }}"
+TG_API="{{ notify_tg_api }}"
+TAIL_N={{ notify_journal_lines }}
+
+if [[ ! -r "${CREDS}" ]]; then
+  echo "notify-tg: нет ${CREDS}" >&2
+  exit 1
+fi
+# shellcheck disable=SC1090
+source "${CREDS}"
+
+if [[ -z "${TG_BOT_TOKEN:-}" || -z "${TG_CHAT_ID:-}" ]]; then
+  echo "notify-tg: TG_BOT_TOKEN/TG_CHAT_ID не заданы в ${CREDS}" >&2
+  exit 1
+fi
+
+HOST="$(hostname -s 2>/dev/null || hostname)"
+TS="$(date -u +%FT%TZ)"
+STATE="$(systemctl is-active "${UNIT}" 2>/dev/null || true)"
+TAIL="$(journalctl -u "${UNIT}" --no-pager -n "${TAIL_N}" 2>/dev/null | tail -n "${TAIL_N}" || true)"
+
+# HTML-escape для <pre>...</pre>
+esc_html() {
+  sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+TAIL_ESC="$(printf '%s' "${TAIL}" | esc_html | tail -c 3500)"
+
+MSG="🚨 <b>${HOST}: ${UNIT}</b>
+<i>${TS} (state=${STATE:-?})</i>
+
+<pre>${TAIL_ESC}</pre>"
+
+curl -fsS --max-time 10 \
+  --data-urlencode "chat_id=${TG_CHAT_ID}" \
+  --data-urlencode "parse_mode=HTML" \
+  --data-urlencode "disable_web_page_preview=true" \
+  --data-urlencode "text=${MSG}" \
+  "${TG_API}/bot${TG_BOT_TOKEN}/sendMessage" >/dev/null

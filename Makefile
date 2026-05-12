@@ -1,4 +1,4 @@
-.PHONY: help check plan plan-from apply status switch refresh-nodes lint vault-edit vault-encrypt-staging facts build-wdtt gen-password
+.PHONY: help check plan plan-from apply status selfcheck switch refresh-nodes lint vault-edit vault-encrypt-staging facts build-wdtt gen-password
 
 ANSIBLE       ?= ansible-playbook
 INV           ?= inventory/hosts.yml
@@ -24,6 +24,7 @@ help:
 	@echo "make apply SKIP_TAGS=apt — пропустить установку пакетов (если уже стоит)"
 	@echo "make apply HOST=vpn2 — выполнить только на одном хосте"
 	@echo "make status           — собрать факты и показать состояние сервисов"
+	@echo "make selfcheck        — прогнать vpn-selfcheck.sh на хосте(ах)"
 	@echo "make refresh-nodes    — обновить /etc/sing-box/nodes.json из подписки"
 	@echo "make switch INDEX=2   — переключить sing-box на ноду #2"
 	@echo "make switch NEXT=1    — следующая нода"
@@ -52,6 +53,9 @@ apply-from:
 
 status:
 	@$(ANSIBLE) playbooks/status.yml $(ANSIBLE_FLAGS)
+
+selfcheck:
+	@$(ANSIBLE) playbooks/selfcheck.yml $(ANSIBLE_FLAGS)
 
 refresh-nodes:
 	@$(ANSIBLE) playbooks/refresh-nodes.yml $(ANSIBLE_FLAGS)

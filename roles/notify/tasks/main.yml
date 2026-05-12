@@ -1,0 +1,68 @@
+---
+# ──────────────────────────────────────────────────────────────────────
+# Telegram-нотификации о падающих systemd-юнитах через OnFailure=.
+# Кладёт скрипт + инстанс-юнит notify-tg@.service. В целевом юните
+# (например vpn-selfcheck.service) добавляется OnFailure=notify-tg@%n.service.
+# ──────────────────────────────────────────────────────────────────────
+
+- name: Установить curl (для Telegram API)
+  ansible.builtin.apt:
+    name: curl
+    state: present
+  tags: [apt]
+
+- name: Pre-flight — креды Telegram заданы
+  ansible.builtin.assert:
+    that:
+      - vault_tg_token | default('') | length > 0
+      - vault_tg_chat_id | default('') | length > 0
+    fail_msg: |
+      Не задан vault_tg_token / vault_tg_chat_id в vault.yml.
+      make vault-edit → добавить переменные.
+
+- name: Креды Telegram (env-файл для скрипта)
+  ansible.builtin.copy:
+    dest: "{{ notify_creds_path }}"
+    mode: "0600"
+    owner: root
+    group: root
+    content: |
+      TG_BOT_TOKEN={{ vault_tg_token }}
+      TG_CHAT_ID={{ vault_tg_chat_id }}
+  no_log: true
+
+- name: Скрипт отправки уведомления
+  ansible.builtin.template:
+    src: notify-tg.sh.j2
+    dest: "{{ notify_script_path }}"
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Инстанс-юнит notify-tg@.service
+  ansible.builtin.template:
+    src: notify-tg.service.j2
+    dest: "/etc/systemd/system/{{ notify_template_unit }}@.service"
+    mode: "0644"
+  notify: reload systemd (notify)
+
+# ── OnFailure drop-in для каждого юнита из notify_units ──────────────
+# Каталог /etc/systemd/system/<unit>.d/ + notify.conf с OnFailure=.
+# Так не трогаем шаблоны самих юнитов (включая системные openvpn/wg/nftables).
+- name: drop-in каталоги для OnFailure
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.d"
+    state: directory
+    mode: "0755"
+  loop: "{{ notify_units }}"
+
+- name: drop-in notify.conf (OnFailure=notify-tg@%n.service)
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item }}.d/notify.conf"
+    mode: "0644"
+    content: |
+      # {{ ansible_managed }}
+      [Unit]
+      OnFailure={{ notify_template_unit }}@%n.service
+  loop: "{{ notify_units }}"
+  notify: reload systemd (notify)

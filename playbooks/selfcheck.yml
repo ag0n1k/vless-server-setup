@@ -1,0 +1,41 @@
+---
+# Ad-hoc запуск self-check скрипта на удалённом хосте (без ожидания
+# systemd-таймера). Тот же бинарь, тот же exit code.
+# Использование:
+#   make selfcheck                — на всех хостах с selfcheck_enabled
+#   make selfcheck HOST=vpn2      — только vpn2
+
+- name: VPN gateway self-check
+  hosts: "{{ target | default('all') }}"
+  become: true
+  gather_facts: false
+  vars:
+    selfcheck_script_path: /usr/local/sbin/vpn-selfcheck.sh
+
+  tasks:
+    - name: Проверить что скрипт self-check установлен
+      ansible.builtin.stat:
+        path: "{{ selfcheck_script_path }}"
+      register: _sc_stat
+
+    - name: Skip — selfcheck не развёрнут (нужен apply с selfcheck_enabled=true)
+      when: not _sc_stat.stat.exists
+      ansible.builtin.meta: end_host
+
+    - name: Запустить vpn-selfcheck.sh
+      ansible.builtin.command: "{{ selfcheck_script_path }}"
+      register: _sc
+      changed_when: false
+      failed_when: false
+
+    - name: Результат self-check
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'OK — ' ~ _sc.stdout
+             if (_sc.rc | int) == 0
+             else 'FAIL (rc=' ~ _sc.rc ~ ')\n' ~ (_sc.stderr | default('')) }}
+
+    - name: Зафейлить плейбук если self-check провалился
+      ansible.builtin.fail:
+        msg: "self-check на {{ inventory_hostname }} провалился"
+      when: (_sc.rc | int) != 0

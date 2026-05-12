@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Self-check VPN-шлюза. Проверяет:
+#   1. ключевые systemd-сервисы (openvpn, wg, sing-box, vk-turn-proxy, ...) active
+#   2. egress через sing-box (socks5h) != WAN IP сервера
+#   3. NTP-синхронизация
+#   4. nft-таблицы tproxy/guard на месте
+#   5. ip rule fwmark + ip route в таблице tproxy
+#   6. capture-интерфейсы up и присутствуют в правилах tproxy
+# Дополнительно: при N подряд egress-провалах и AUTO_SWITCH=1 — дёргает
+# sb_recover.py (rotation next-нод).
+# Exit 0 — всё ок, 1 — есть провалы (список в stderr).
+
+set -u
+set -o pipefail
+
+SOCKS_PORT="{{ selfcheck_socks_port }}"
+TPROXY_PORT="{{ selfcheck_tproxy_port }}"
+TEST_URL="{{ selfcheck_test_url }}"
+CURL_TIMEOUT="{{ selfcheck_curl_timeout }}"
+FWMARK="{{ selfcheck_fwmark }}"
+RT_TABLE="{{ selfcheck_rt_table }}"
+SERVER_IP="{{ selfcheck_server_public_ip }}"
+CAPTURE_IFACES=({{ selfcheck_capture_ifaces | map('quote') | join(' ') }})
+NFT_TABLES=({{ selfcheck_nft_tables | map('quote') | join(' ') }})
+REQUIRED_SERVICES=({{ selfcheck_required_services | map('quote') | join(' ') }})
+
+STATE_DIR="{{ selfcheck_state_dir }}"
+AUTO_SWITCH="{{ '1' if selfcheck_auto_switch_enabled else '0' }}"
+AUTO_SWITCH_THRESHOLD="{{ selfcheck_auto_switch_threshold }}"
+RECOVER_PATH="{{ selfcheck_recover_path }}"
+RECOVER_MAX_TRIES="{{ selfcheck_recover_max_tries }}"
+
+{% raw %}
+FAILS=()
+EGRESS=""
+EGRESS_FAILED=0
+STATE_FILE="${STATE_DIR}/egress-fails"
+
+fail() { FAILS+=("$1"); }
+
+read_state() {
+  if [[ -r "${STATE_FILE}" ]]; then
+    cat "${STATE_FILE}" 2>/dev/null || echo 0
+  else
+    echo 0
+  fi
+}
+write_state() { mkdir -p "${STATE_DIR}"; echo "$1" >"${STATE_FILE}"; }
+
+# 1. Обязательные сервисы active
+SINGBOX_ALIVE=1
+for svc in "${REQUIRED_SERVICES[@]}"; do
+  if ! systemctl is-active --quiet "${svc}"; then
+    STATE="$(systemctl is-active "${svc}" 2>/dev/null || true)"
+    fail "service ${svc}: state=${STATE:-unknown}"
+    [[ "${svc}" == "sing-box.service" ]] && SINGBOX_ALIVE=0
+  fi
+done
+
+# 2. Egress через sing-box (только если sing-box жив)
+if [[ "${SINGBOX_ALIVE}" -eq 1 ]]; then
+  EGRESS="$(curl -fsS --max-time "${CURL_TIMEOUT}" \
+            --proxy "socks5h://127.0.0.1:${SOCKS_PORT}" \
+            "${TEST_URL}" 2>/dev/null || true)"
+  EGRESS="${EGRESS//[$'\t\r\n ']}"
+  if [[ -z "${EGRESS}" ]]; then
+    fail "egress: curl через socks5h://127.0.0.1:${SOCKS_PORT} ничего не вернул"
+    EGRESS_FAILED=1
+  elif [[ "${EGRESS}" == "${SERVER_IP}" ]]; then
+    fail "egress: трафик уходит напрямую через WAN (${EGRESS} == server_public_ip)"
+    EGRESS_FAILED=1
+  fi
+fi
+
+# 3. NTP-синхронизация — без точного времени TLS-handshake разваливается
+NTP_SYNC="$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)"
+if [[ "${NTP_SYNC}" != "yes" ]]; then
+  fail "NTP: системные часы не синхронизированы (NTPSynchronized=${NTP_SYNC:-?})"
+fi
+
+# 4. nft-таблицы tproxy/guard
+for tbl in "${NFT_TABLES[@]}"; do
+  if ! nft list table inet "${tbl}" >/dev/null 2>&1; then
+    fail "nft: таблицы inet ${tbl} нет"
+  fi
+done
+
+# 5. ip rule + ip route
+FWMARK_HEX="$(printf '0x%x' "${FWMARK}")"
+if ! ip -4 rule show | grep -qE "fwmark ${FWMARK_HEX} lookup ${RT_TABLE}"; then
+  fail "ip rule: нет 'fwmark ${FWMARK_HEX} lookup ${RT_TABLE}'"
+fi
+
+if ! ip route show table "${RT_TABLE}" 2>/dev/null | grep -qE '^local default dev lo'; then
+  fail "ip route: в table ${RT_TABLE} нет 'local default dev lo'"
+fi
+
+# 6. Capture-интерфейсы up + ловятся tproxy-цепочкой
+TPROXY_DUMP="$(nft list table inet vpn_tproxy 2>/dev/null || true)"
+for iface in "${CAPTURE_IFACES[@]}"; do
+  if ! ip link show "${iface}" >/dev/null 2>&1; then
+    fail "iface ${iface}: интерфейс отсутствует"
+    continue
+  fi
+  STATE="$(ip -o link show "${iface}" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="state") print $(i+1)}')"
+  if [[ "${STATE}" != "UP" && "${STATE}" != "UNKNOWN" ]]; then
+    fail "iface ${iface}: state=${STATE} (ожидалось UP/UNKNOWN)"
+  fi
+  if ! grep -qE "iifname \"${iface}\".*tproxy to :${TPROXY_PORT}" <<<"${TPROXY_DUMP}"; then
+    fail "iface ${iface}: не найден в vpn_tproxy → tproxy :${TPROXY_PORT}"
+  fi
+done
+
+# ── Auto-recovery: state-counter подряд egress-провалов ──────────────
+# Считаем только когда успели сделать сам egress-check (sing-box был жив).
+if [[ "${SINGBOX_ALIVE}" -eq 1 ]]; then
+  if [[ "${EGRESS_FAILED}" -eq 1 ]]; then
+    FAILS_PREV="$(read_state)"
+    FAILS_CUR=$(( FAILS_PREV + 1 ))
+    write_state "${FAILS_CUR}"
+    if [[ "${AUTO_SWITCH}" == "1" && "${FAILS_CUR}" -ge "${AUTO_SWITCH_THRESHOLD}" ]]; then
+      echo "$(date -u +%FT%TZ) selfcheck: ${FAILS_CUR} подряд egress-провалов → запускаю ${RECOVER_PATH}" >&2
+      if "${RECOVER_PATH}" "${RECOVER_MAX_TRIES}" >&2; then
+        write_state 0
+        FAILS+=("auto-recover: переключились на резервную ноду")
+      else
+        FAILS+=("auto-recover: rotation провалился (см. лог recover)")
+      fi
+    fi
+  else
+    write_state 0
+  fi
+fi
+
+# Финал
+TS="$(date -u +%FT%TZ)"
+FAILS_N="${#FAILS[@]}"
+if [[ "${FAILS_N}" -eq 0 ]]; then
+  echo "${TS} selfcheck OK (egress=${EGRESS:-?})"
+  exit 0
+fi
+
+echo "${TS} selfcheck FAIL (${FAILS_N}):" >&2
+for f in "${FAILS[@]}"; do
+  echo "  - ${f}" >&2
+done
+exit 1
+{% endraw %}

@@ -38,3 +38,9 @@
       tags: [singbox]
     - role: tproxy
       tags: [tproxy]
+    - role: notify
+      tags: [notify]
+      when: notify_enabled | default(false) | bool
+    - role: selfcheck
+      tags: [selfcheck]
+      when: selfcheck_enabled | default(false) | bool

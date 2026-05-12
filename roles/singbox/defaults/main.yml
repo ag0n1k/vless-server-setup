@@ -3,4 +3,18 @@ sb_dir: /etc/sing-box
 sb_cfg: /etc/sing-box/config.json
 sb_nodes: /etc/sing-box/nodes.json
 sb_current: /etc/sing-box/current-node.json
+sb_subs_list: /etc/sing-box/subs.list
 sb_unit: sing-box.service
+
+# Локальный refresh-nodes: на хосте крутится таймер, дёргающий
+# sb_parse_subs.py с URLs из {{ sb_subs_list }}. Так nodes.json не
+# протухает без апдейтов от ansible.
+sb_refresh_unit: sing-box-refresh
+sb_refresh_on_calendar: "daily"
+sb_refresh_randomized_delay_sec: 1800
+
+# Локальный auto-recover (rotation next-нод). Используется self-check'ом
+# при пороге подряд-провалов egress'а.
+sb_recover_path: /usr/local/sbin/sb_recover.py
+sb_recover_max_tries: 5
+sb_recover_test_url: https://api.ipify.org

@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+# {{ ansible_managed }}
+"""Auto-recover sing-box: rotation по nodes.json пока egress не оживёт.
+
+Логика:
+  1. Бэкап текущего config.json в /tmp/sing-box-config-recover.json
+  2. Идём по next от current_idx, max MAX_TRIES попыток.
+  3. Для каждой ноды: cb_config_gen → restart sing-box → wait socks5 →
+     curl egress IP. Если IP не пустой и != server_public_ip — победа.
+  4. Если ни одна не ожила — откат на исходный конфиг и exit 1.
+
+Запускается локально из self-check скрипта при N подряд egress-провалах.
+"""
+import datetime
+import json
+import shutil
+import socket
+import subprocess
+import sys
+import time
+
+CFG     = "{{ sb_cfg }}"
+NODES   = "{{ sb_nodes }}"
+CURRENT = "{{ sb_current }}"
+BACKUP  = "/tmp/sing-box-config-recover.json"
+SB_CFG_GEN  = "/usr/local/lib/sb_config_gen.py"
+
+SOCKS_PORT  = {{ singbox_socks_port }}
+TPROXY_PORT = {{ singbox_tproxy_port }}
+LOG_LEVEL   = "{{ singbox_log_level }}"
+TEST_URL    = "{{ sb_recover_test_url | default('https://api.ipify.org') }}"
+SERVER_IP   = "{{ server_public_ip | default(ansible_host) }}"
+DEFAULT_MAX_TRIES = {{ sb_recover_max_tries | default(5) }}
+
+
+def log(msg: str) -> None:
+    ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(f"{ts} [sb_recover] {msg}", flush=True)
+
+
+def restart_singbox() -> None:
+    subprocess.run(["systemctl", "restart", "sing-box.service"], check=True)
+
+
+def wait_socks(port: int, timeout: int = 15) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                return True
+        except OSError:
+            time.sleep(0.3)
+    return False
+
+
+def egress_ip() -> str:
+    r = subprocess.run(
+        ["curl", "-fsS", "--max-time", "8",
+         "--proxy", f"socks5h://127.0.0.1:{SOCKS_PORT}", TEST_URL],
+        capture_output=True, text=True,
+    )
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def write_current(idx: int, node: dict, ip: str) -> None:
+    payload = {
+        "index": idx,
+        "label": node.get("label"),
+        "server": node.get("server"),
+        "port": node.get("port"),
+        "switched_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "egress_ip": ip,
+        "switched_by": "auto-recover",
+    }
+    with open(CURRENT, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def main() -> int:
+    max_tries = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_MAX_TRIES
+
+    with open(NODES, "r", encoding="utf-8") as f:
+        nodes = json.load(f).get("nodes", [])
+    if not nodes:
+        log("nodes.json пуст — recover невозможен")
+        return 2
+
+    try:
+        with open(CURRENT, "r", encoding="utf-8") as f:
+            cur_idx = int(json.load(f).get("index", 0))
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        cur_idx = 0
+
+    shutil.copy2(CFG, BACKUP)
+
+    tries = min(max_tries, len(nodes))
+    for step in range(1, tries + 1):
+        idx = (cur_idx + step) % len(nodes)
+        node = nodes[idx]
+        label = node.get("label", "?")
+        log(f"попытка {step}/{tries}: #{idx + 1} {label}")
+        subprocess.run(
+            [SB_CFG_GEN, json.dumps(node, ensure_ascii=False),
+             CFG, str(SOCKS_PORT), str(TPROXY_PORT), LOG_LEVEL],
+            check=True,
+        )
+        restart_singbox()
+        if not wait_socks(SOCKS_PORT):
+            log("  socks5 не поднялся за 15s")
+            continue
+        ip = egress_ip()
+        if ip and ip != SERVER_IP:
+            log(f"  ok, egress={ip}")
+            write_current(idx, node, ip)
+            return 0
+        log(f"  fail (egress='{ip or '<empty>'}')")
+
+    log("все попытки исчерпаны, откат на исходный config.json")
+    shutil.copy2(BACKUP, CFG)
+    restart_singbox()
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

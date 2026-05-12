@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Run VPN gateway self-check periodically
+
+[Timer]
+OnBootSec={{ selfcheck_timer_on_boot_sec }}
+OnUnitActiveSec={{ selfcheck_timer_on_unit_active_sec }}
+RandomizedDelaySec={{ selfcheck_timer_randomized_delay_sec }}
+AccuracySec=1s
+Persistent=true
+Unit={{ selfcheck_unit_name }}.service
+
+[Install]
+WantedBy=timers.target

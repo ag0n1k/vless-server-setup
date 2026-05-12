@@ -7,3 +7,10 @@
   ansible.builtin.systemd:
     name: "{{ sb_unit }}"
     state: restarted
+
+- name: restart sing-box-refresh timer
+  ansible.builtin.systemd:
+    name: "{{ sb_refresh_unit }}.timer"
+    state: restarted
+    enabled: true
+  when: not ansible_check_mode

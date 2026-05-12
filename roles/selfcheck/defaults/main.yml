@@ -1,0 +1,58 @@
+---
+# По умолчанию роль выключена — включать на конкретном хосте через host_vars.
+selfcheck_enabled: false
+
+# Куда ставим всё хозяйство
+selfcheck_script_path: /usr/local/sbin/vpn-selfcheck.sh
+selfcheck_unit_name: vpn-selfcheck
+selfcheck_log_path: /var/log/vpn-selfcheck.log
+
+# Параметры egress-проверки. Берём из group_vars (sing-box / tproxy),
+# чтобы источник правды был один.
+selfcheck_socks_port: "{{ singbox_socks_port }}"
+selfcheck_tproxy_port: "{{ singbox_tproxy_port }}"
+selfcheck_test_url: https://api.ipify.org
+selfcheck_curl_timeout: 8
+
+# TPROXY-инварианты
+selfcheck_fwmark: "{{ tproxy_fwmark }}"
+selfcheck_rt_table: "{{ tproxy_rt_table_name }}"
+selfcheck_capture_ifaces: "{{ tproxy_capture_ifaces }}"
+selfcheck_nft_tables:
+  - vpn_tproxy
+  - vpn_guard
+
+# State-каталог для счётчика подряд-провалов egress
+selfcheck_state_dir: /var/lib/vpn-selfcheck
+
+# Auto-recovery: при N подряд egress-провалах дёрнуть локальный
+# sb_recover.py (rotation next-нод). По умолчанию выключено —
+# включается per-host через host_vars.
+selfcheck_auto_switch_enabled: false
+selfcheck_auto_switch_threshold: 3
+selfcheck_recover_path: /usr/local/sbin/sb_recover.py
+selfcheck_recover_max_tries: 5
+
+# OnFailure-юнит для self-check. Пусто → строка не добавляется.
+# При notify_enabled=true укажет на notify-tg@%n.service из роли notify.
+selfcheck_onfailure_unit: ""
+
+# Сервисы которые должны быть active. Переопределяй в host_vars если
+# на хосте отключён WDTT / отсутствует fail2ban и т.п.
+selfcheck_required_services:
+  - openvpn-server@server.service
+  - "wg-quick@{{ wg_interface }}.service"
+  - "wg-quick@{{ wdtt_wg_iface }}.service"
+  - sing-box.service
+  - vk-turn-proxy.service
+  - fail2ban.service
+  - nftables.service
+
+# Server public IP — против него сверяем egress (чтобы trafic не утекал
+# напрямую через WAN при упавшем sing-box).
+selfcheck_server_public_ip: "{{ server_public_ip | default(ansible_host) }}"
+
+# Systemd timer
+selfcheck_timer_on_boot_sec: 2min
+selfcheck_timer_on_unit_active_sec: 5min
+selfcheck_timer_randomized_delay_sec: 30

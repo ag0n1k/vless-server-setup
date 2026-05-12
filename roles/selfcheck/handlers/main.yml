@@ -1,0 +1,11 @@
+---
+- name: reload systemd (selfcheck)
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart selfcheck timer
+  ansible.builtin.systemd:
+    name: "{{ selfcheck_unit_name }}.timer"
+    state: restarted
+    enabled: true
+  when: not ansible_check_mode

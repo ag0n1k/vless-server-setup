@@ -310,3 +310,67 @@
     enabled: true
     state: started
     daemon_reload: true
+
+# ── Локальный refresh-nodes (без Ansible) ────────────────────────────
+- name: Положить sb_recover.py (локальный auto-rotation нод)
+  ansible.builtin.template:
+    src: sb_recover.py.j2
+    dest: "{{ sb_recover_path }}"
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: subs.list — список subscription URLs для локального refresh
+  ansible.builtin.copy:
+    dest: "{{ sb_subs_list }}"
+    content: "{{ vault_subscription_urls }}\n"
+    mode: "0600"
+    owner: root
+    group: root
+  no_log: true
+
+- name: sing-box-refresh — oneshot юнит для обновления nodes.json
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ sb_refresh_unit }}.service"
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Refresh sing-box nodes.json from subscription URLs
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/bash -c '/usr/local/lib/sb_parse_subs.py "$(cat {{ sb_subs_list }})" {{ sb_nodes }}'
+      Nice=10
+  notify:
+    - reload systemd
+    - restart sing-box-refresh timer
+
+- name: sing-box-refresh.timer — расписание обновления
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ sb_refresh_unit }}.timer"
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Periodic refresh of sing-box nodes.json
+
+      [Timer]
+      OnCalendar={{ sb_refresh_on_calendar }}
+      RandomizedDelaySec={{ sb_refresh_randomized_delay_sec }}
+      Persistent=true
+      Unit={{ sb_refresh_unit }}.service
+
+      [Install]
+      WantedBy=timers.target
+  notify:
+    - reload systemd
+    - restart sing-box-refresh timer
+
+- name: Включить и запустить sing-box-refresh.timer
+  ansible.builtin.systemd:
+    name: "{{ sb_refresh_unit }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
