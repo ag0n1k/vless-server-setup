@@ -12,4 +12,10 @@
 #
 # Чтобы добавить: ansible-playbook playbooks/add-wg-peer.yml -e name=<...> -e wg_ip=<...> -e vpn_server=vpn2
 
-wg_peers: []
+wg_peers:
+  - name: fast-giga
+    pubkey: YdqSe5/kStHBYP/NlpIEAO8ZlKzxaFJo+zZUTnGM61k=
+    allowed_ips:
+      - 10.188.0.4/32
+    persistent_keepalive: 25
+    state: present
