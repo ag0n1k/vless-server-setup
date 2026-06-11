@@ -37,6 +37,13 @@ selfcheck_recover_max_tries: 5
 # При notify_enabled=true укажет на notify-tg@%n.service из роли notify.
 selfcheck_onfailure_unit: ""
 
+# Сколько подряд-фейлов селф-чека терпим прежде чем дёрнуть TG.
+# Одиночные моргания egress/NTP не должны будить владельца.
+# Why: чек гоняется каждые 5 мин и иногда таймаутит на дальних нодах
+# vpnd.io; реальные инциденты держатся ≥3 итерации подряд.
+selfcheck_alert_threshold: 3
+selfcheck_notify_script_path: "{{ notify_script_path | default('/usr/local/sbin/notify-tg.sh') }}"
+
 # Сервисы которые должны быть active. Переопределяй в host_vars если
 # на хосте отключён WDTT / отсутствует fail2ban и т.п.
 selfcheck_required_services:

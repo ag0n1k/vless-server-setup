@@ -10,7 +10,9 @@ OnFailure={{ selfcheck_onfailure_unit }}
 [Service]
 Type=oneshot
 ExecStart={{ selfcheck_script_path }}
-# Лог результата в файл — журналы systemd тоже остаются
-StandardOutput=append:{{ selfcheck_log_path }}
-StandardError=append:{{ selfcheck_log_path }}
+# Вывод в journal — `journalctl -u vpn-selfcheck` показывает причину фейла,
+# а notify-tg прикладывает tail журнала к сообщению. Файл-лог
+# {{ selfcheck_log_path }} дублируется самим скриптом через tee.
+StandardOutput=journal
+StandardError=journal
 Nice=10

@@ -7,8 +7,11 @@
 #   4. nft-таблицы tproxy/guard на месте
 #   5. ip rule fwmark + ip route в таблице tproxy
 #   6. capture-интерфейсы up и присутствуют в правилах tproxy
-# Дополнительно: при N подряд egress-провалах и AUTO_SWITCH=1 — дёргает
-# sb_recover.py (rotation next-нод).
+# Дополнительно:
+#   - при N подряд egress-провалах и AUTO_SWITCH=1 — дёргает sb_recover.py
+#     (rotation next-нод).
+#   - при ALERT_THRESHOLD подряд-фейлов любого типа — зовёт notify-tg.sh
+#     один раз за инцидент, recovery-сообщение шлёт при первом OK.
 # Exit 0 — всё ок, 1 — есть провалы (список в stderr).
 
 set -u
@@ -31,11 +34,26 @@ AUTO_SWITCH_THRESHOLD="{{ selfcheck_auto_switch_threshold }}"
 RECOVER_PATH="{{ selfcheck_recover_path }}"
 RECOVER_MAX_TRIES="{{ selfcheck_recover_max_tries }}"
 
+LOG="{{ selfcheck_log_path }}"
+ALERT_THRESHOLD="{{ selfcheck_alert_threshold }}"
+NOTIFY_SCRIPT="{{ selfcheck_notify_script_path }}"
+SELFCHECK_UNIT="{{ selfcheck_unit_name }}.service"
+
+{% raw %}
+# Дублируем stdout/stderr в файл-лог (journal получает копию через systemd).
+mkdir -p "$(dirname "${LOG}")"
+exec > >(tee -a "${LOG}") 2>&1
+{% endraw %}
+
 {% raw %}
 FAILS=()
 EGRESS=""
 EGRESS_FAILED=0
 STATE_FILE="${STATE_DIR}/egress-fails"
+# Общий счётчик подряд-фейлов (любой неуспех чека) — для TG-алёрта с порогом.
+# Отдельно от egress-counter, который управляет auto-switch.
+GENERAL_STATE_FILE="${STATE_DIR}/general-fails"
+NOTIFIED_FLAG="${STATE_DIR}/notified"
 
 fail() { FAILS+=("$1"); }
 
@@ -87,12 +105,19 @@ for tbl in "${NFT_TABLES[@]}"; do
 done
 
 # 5. ip rule + ip route
+# ВАЖНО: вывод команды читаем в переменную и грепаем here-string'ом, а НЕ
+# `ip ... | grep -q`. Под `set -o pipefail` grep -q закрывает pipe на первом
+# совпадении → ip ловит SIGPIPE (rc 141) → pipe считается провалившимся →
+# `if ! pipe` ЛОЖНО срабатывает как «правила нет». Флапает ~50/50, когда
+# правило реально присутствует. (Тот же безопасный паттерн — в проверке #6.)
 FWMARK_HEX="$(printf '0x%x' "${FWMARK}")"
-if ! ip -4 rule show | grep -qE "fwmark ${FWMARK_HEX} lookup ${RT_TABLE}"; then
+RULE_DUMP="$(ip -4 rule show 2>/dev/null || true)"
+if ! grep -qE "fwmark ${FWMARK_HEX} lookup ${RT_TABLE}" <<<"${RULE_DUMP}"; then
   fail "ip rule: нет 'fwmark ${FWMARK_HEX} lookup ${RT_TABLE}'"
 fi
 
-if ! ip route show table "${RT_TABLE}" 2>/dev/null | grep -qE '^local default dev lo'; then
+ROUTE_DUMP="$(ip route show table "${RT_TABLE}" 2>/dev/null || true)"
+if ! grep -qE '^local default dev lo' <<<"${ROUTE_DUMP}"; then
   fail "ip route: в table ${RT_TABLE} нет 'local default dev lo'"
 fi
 
@@ -136,8 +161,33 @@ fi
 # Финал
 TS="$(date -u +%FT%TZ)"
 FAILS_N="${#FAILS[@]}"
+
+# Общий счётчик подряд-фейлов + TG-алёрт по порогу.
+# Why: одиночные osечки (egress timeout / NTP моргнул) не должны звенеть в TG.
+GEN_PREV=0
+if [[ -r "${GENERAL_STATE_FILE}" ]]; then
+  GEN_PREV="$(cat "${GENERAL_STATE_FILE}" 2>/dev/null || echo 0)"
+fi
+mkdir -p "${STATE_DIR}"
+
+notify() {
+  # $1 — текст-причина (для лога); сам notify-tg.sh подтянет journal-tail
+  local reason="$1"
+  echo "${TS} selfcheck: notify-tg → ${reason}"
+  if [[ -x "${NOTIFY_SCRIPT}" ]]; then
+    "${NOTIFY_SCRIPT}" "${SELFCHECK_UNIT}" || \
+      echo "${TS} selfcheck: notify-tg.sh завершился с ошибкой" >&2
+  fi
+}
+
 if [[ "${FAILS_N}" -eq 0 ]]; then
   echo "${TS} selfcheck OK (egress=${EGRESS:-?})"
+  echo 0 >"${GENERAL_STATE_FILE}"
+  # Recovery-нотификация: если до этого мы уже звонили о проблеме — закрыть инцидент.
+  if [[ -f "${NOTIFIED_FLAG}" ]]; then
+    notify "recovered after $(cat "${NOTIFIED_FLAG}" 2>/dev/null || echo "?" ) consecutive fails"
+    rm -f "${NOTIFIED_FLAG}"
+  fi
   exit 0
 fi
 
@@ -145,5 +195,15 @@ echo "${TS} selfcheck FAIL (${FAILS_N}):" >&2
 for f in "${FAILS[@]}"; do
   echo "  - ${f}" >&2
 done
+
+GEN_CUR=$(( GEN_PREV + 1 ))
+echo "${GEN_CUR}" >"${GENERAL_STATE_FILE}"
+
+# Алёрт только когда счётчик пересёк порог и мы ещё не звонили в этом инциденте.
+if [[ "${GEN_CUR}" -ge "${ALERT_THRESHOLD}" && ! -f "${NOTIFIED_FLAG}" ]]; then
+  echo "${GEN_CUR}" >"${NOTIFIED_FLAG}"
+  notify "${GEN_CUR} consecutive fails ≥ threshold ${ALERT_THRESHOLD}"
+fi
+
 exit 1
 {% endraw %}

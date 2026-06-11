@@ -61,7 +61,7 @@
     dest: "/etc/systemd/system/{{ item }}.d/notify.conf"
     mode: "0644"
     content: |
-      # {{ ansible_managed }}
+      # Managed by Ansible (roles/notify) — do not edit
       [Unit]
       OnFailure={{ notify_template_unit }}@%n.service
   loop: "{{ notify_units }}"

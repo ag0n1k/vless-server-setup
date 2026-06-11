@@ -29,6 +29,14 @@ selfcheck_auto_switch_enabled: true
 # и у psn-watch). Токен/chat_id — в vault_tg_token / vault_tg_chat_id.
 # OnFailure повешан через drop-in'ы на список юнитов ниже — шаблоны
 # самих юнитов не трогаем.
+#
+# vpn-selfcheck.service СОЗНАТЕЛЬНО исключён: сам скрипт умеет звать
+# notify-tg.sh при пересечении selfcheck_alert_threshold подряд-фейлов
+# (одиночные таймауты egress не должны будить). Если хочется вернуть
+# алёрт-на-каждый-fail — дописать обратно в этот список.
+# ВАЖНО: при первом apply после удаления — руками снести
+# /etc/systemd/system/vpn-selfcheck.service.d/notify.conf и `daemon-reload`,
+# роль notify пока не purge'ит drop-in'ы.
 notify_enabled: true
 notify_units:
   - openvpn-server@server.service
@@ -39,4 +47,3 @@ notify_units:
   - vk-turn-proxy.service
   - fail2ban.service
   - nftables.service
-  - vpn-selfcheck.service
