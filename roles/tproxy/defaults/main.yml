@@ -1,3 +1,11 @@
 ---
 tproxy_nft_path: /etc/nftables.d/tproxy.nft
 tproxy_rt_tables: /etc/iproute2/rt_tables
+
+# Приоритет ip rule fwmark -> таблица tproxy.
+tproxy_rt_rule_pref: 100
+
+# Persistence: oneshot-юнит восстанавливает ip rule + route при буте и
+# вместе с nftables (runtime-команды ip rule/route ребут не переживают).
+tproxy_routing_script: /usr/local/sbin/tproxy-routing.sh
+tproxy_routing_unit: tproxy-routing.service

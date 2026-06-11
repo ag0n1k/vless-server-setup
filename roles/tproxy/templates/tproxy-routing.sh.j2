@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# TPROXY policy-routing: fwmark -> отдельная таблица -> local default на lo.
+#
+# Зачем отдельный скрипт+юнит, а не только runtime-команды в роли:
+# `ip rule`/`ip route` живут только в памяти ядра и НЕ переживают ребут
+# или передёргивание сети. Без правила 'fwmark 0x{{ '%x' | format(tproxy_fwmark) }} lookup {{ tproxy_rt_table_name }}'
+# помеченные nft-ом пакеты VPN-клиентов (tun0/wg0/wg1) некуда направить —
+# tproxy-доставка в локальный sing-box ломается, клиенты теряют проксинг.
+# Юнит tproxy-routing.service зовёт этот скрипт при буте и вместе с nftables.
+#
+# Идемпотентно: можно гонять сколько угодно, дублей не появится.
+set -euo pipefail
+
+FWMARK="{{ tproxy_fwmark }}"
+RT_TABLE="{{ tproxy_rt_table_name }}"
+RT_ID="{{ tproxy_rt_table_id }}"
+PREF={{ tproxy_rt_rule_pref }}
+RT_TABLES="{{ tproxy_rt_tables }}"
+
+FWMARK_HEX="0x$(printf '%x' "${FWMARK}")"
+
+ensure_rt_table() {
+  # На случай свежего бута/чистой системы — гарантируем имя таблицы в rt_tables.
+  if ! grep -qE "^\s*${RT_ID}\s+${RT_TABLE}\b" "${RT_TABLES}" 2>/dev/null; then
+    echo "${RT_ID} ${RT_TABLE}" >>"${RT_TABLES}"
+  fi
+}
+
+ensure_rule() {
+  # Снести все совпадающие правила, затем добавить ровно одно — без дублей.
+  while ip -4 rule show | grep -qE "fwmark ${FWMARK_HEX} lookup ${RT_TABLE}"; do
+    ip -4 rule del fwmark "${FWMARK}" lookup "${RT_TABLE}" || break
+  done
+  ip -4 rule add fwmark "${FWMARK}" lookup "${RT_TABLE}" pref "${PREF}"
+}
+
+ensure_route() {
+  if ! ip route show table "${RT_TABLE}" 2>/dev/null | grep -qE '^local default dev lo'; then
+    ip route flush table "${RT_TABLE}" 2>/dev/null || true
+    ip route add local 0.0.0.0/0 dev lo table "${RT_TABLE}"
+  fi
+}
+
+up() {
+  ensure_rt_table
+  ensure_rule
+  ensure_route
+}
+
+down() {
+  # Снимаем только наше ip rule (route в таблице безвреден — оставляем).
+  while ip -4 rule show | grep -qE "fwmark ${FWMARK_HEX} lookup ${RT_TABLE}"; do
+    ip -4 rule del fwmark "${FWMARK}" lookup "${RT_TABLE}" || break
+  done
+}
+
+case "${1:-up}" in
+  up)   up ;;
+  down) down ;;
+  *)    echo "usage: $0 {up|down}" >&2; exit 2 ;;
+esac

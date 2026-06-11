@@ -1,0 +1,18 @@
+# {{ ansible_managed }}
+[Unit]
+Description=TPROXY policy routing (ip rule fwmark + local route) for sing-box
+Documentation=man:ip-rule(8)
+# Ждём сеть, поднимаемся после nftables (правила маркировки) и sing-box.
+After=network-online.target nftables.service sing-box.service
+Wants=network-online.target
+# Если кто-то рестартит nftables — контекст tproxy переустановится вместе с ним.
+PartOf=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ tproxy_routing_script }} up
+ExecStop={{ tproxy_routing_script }} down
+
+[Install]
+WantedBy=multi-user.target

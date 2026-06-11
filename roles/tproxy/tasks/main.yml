@@ -14,40 +14,32 @@
     create: true
     mode: "0644"
 
-- name: Посчитать ip rule fwmark
-  ansible.builtin.shell: |
-    set -o pipefail
-    ip -4 rule show | grep -cE "fwmark 0x{{ '%x' | format(tproxy_fwmark) }} lookup {{ tproxy_rt_table_name }}" || true
-  args:
-    executable: /bin/bash
-  register: _fwmark_count
-  changed_when: false
-  check_mode: false
+# ip rule fwmark + local route раньше ставились runtime-командами прямо
+# отсюда — но они живут только в памяти ядра и пропадают при ребуте или
+# передёргивании сети (именно так однажды отвалился tproxy: nft метил
+# пакеты, а направить их в таблицу tproxy было нечем). Теперь единый
+# источник правды — скрипт + oneshot-юнит, который восстанавливает их
+# при буте и вместе с nftables.
+- name: Скрипт persistence для tproxy policy-routing
+  ansible.builtin.template:
+    src: tproxy-routing.sh.j2
+    dest: "{{ tproxy_routing_script }}"
+    mode: "0755"
+  notify: restart tproxy-routing
 
-- name: Восстановить единичное ip rule fwmark (при дубликатах/отсутствии)
-  ansible.builtin.shell: |
-    set -e
-    while ip -4 rule show | grep -qE "fwmark 0x{{ '%x' | format(tproxy_fwmark) }} lookup {{ tproxy_rt_table_name }}"; do
-      ip -4 rule del fwmark {{ tproxy_fwmark }} lookup {{ tproxy_rt_table_name }} || break
-    done
-    ip -4 rule add fwmark {{ tproxy_fwmark }} lookup {{ tproxy_rt_table_name }} pref 100
-  when: (_fwmark_count.stdout | trim | int) != 1
-  changed_when: true
+- name: Юнит tproxy-routing.service (ip rule + route при буте)
+  ansible.builtin.template:
+    src: tproxy-routing.service.j2
+    dest: "/etc/systemd/system/{{ tproxy_routing_unit }}"
+    mode: "0644"
+  notify: restart tproxy-routing
 
-- name: Проверить local default в таблице tproxy
-  ansible.builtin.command: ip route show table {{ tproxy_rt_table_name }}
-  register: _tproxy_route
-  changed_when: false
-  check_mode: false
-  failed_when: false
-
-- name: Добавить local default в таблицу tproxy (если отсутствует)
-  ansible.builtin.shell: |
-    set -e
-    ip route flush table {{ tproxy_rt_table_name }} 2>/dev/null || true
-    ip route add local 0.0.0.0/0 dev lo table {{ tproxy_rt_table_name }}
-  when: _tproxy_route.stdout is not search('^local default dev lo')
-  changed_when: true
+- name: Включить и запустить tproxy-routing (ставит ip rule + route)
+  ansible.builtin.systemd:
+    name: "{{ tproxy_routing_unit }}"
+    enabled: true
+    state: started
+    daemon_reload: true
 
 - name: Найти старые TPROXY-таблицы (если остались с прошлой схемы)
   ansible.builtin.shell: |
