@@ -14,6 +14,20 @@ selfcheck_tproxy_port: "{{ singbox_tproxy_port }}"
 selfcheck_test_url: https://api.ipify.org
 selfcheck_curl_timeout: 8
 
+# Ретрай egress-пробы внутри одного прогона. Апстрим vpnd.io иногда роняет
+# VLESS-соединение (outbound EOF) — одиночная осечка не должна считаться
+# провалом и крутить auto-switch/alert-счётчики. FAIL только если все попытки
+# мимо. Успех любой попытки → выход.
+selfcheck_egress_tries: 3
+selfcheck_egress_retry_delay: 3
+
+# Деградация ноды для auto-switch: если egress В ИТОГЕ прошёл, но мимо ушло
+# ≥ N попыток из selfcheck_egress_tries — прогон считается «деградировавшим».
+# Это НЕ алертит (egress работает) и НЕ копит alert-счётчик, но кормит
+# счётчик auto-switch, чтобы полудохлая нода (50% потерь) всё равно ротировалась,
+# а не пряталась за ретраем. 0 = выключить детектор деградации.
+selfcheck_egress_degrade_fails: 2
+
 # TPROXY-инварианты
 selfcheck_fwmark: "{{ tproxy_fwmark }}"
 selfcheck_rt_table: "{{ tproxy_rt_table_name }}"

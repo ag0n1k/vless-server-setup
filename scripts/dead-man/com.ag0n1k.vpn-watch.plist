@@ -5,10 +5,13 @@
     <key>Label</key>
     <string>com.ag0n1k.vpn-watch</string>
 
+    <!-- НЕинтерактивный shell: креды читаются из ~/vpn-watch/.env внутри
+         скрипта, поэтому ~/.zshrc (powerlevel10k/oh-my-zsh) не подсасывается
+         и в лог больше не сыпется gitstatus/omz-спам. -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/zsh</string>
-        <string>-ilc</string>
+        <string>-f</string>
         <string>/Users/ag0n1k/vpn-watch/check.sh</string>
     </array>
 

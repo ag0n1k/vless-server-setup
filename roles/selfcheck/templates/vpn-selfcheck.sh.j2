@@ -21,6 +21,9 @@ SOCKS_PORT="{{ selfcheck_socks_port }}"
 TPROXY_PORT="{{ selfcheck_tproxy_port }}"
 TEST_URL="{{ selfcheck_test_url }}"
 CURL_TIMEOUT="{{ selfcheck_curl_timeout }}"
+EGRESS_TRIES="{{ selfcheck_egress_tries }}"
+EGRESS_RETRY_DELAY="{{ selfcheck_egress_retry_delay }}"
+EGRESS_DEGRADE_FAILS="{{ selfcheck_egress_degrade_fails }}"
 FWMARK="{{ selfcheck_fwmark }}"
 RT_TABLE="{{ selfcheck_rt_table }}"
 SERVER_IP="{{ selfcheck_server_public_ip }}"
@@ -49,6 +52,8 @@ exec > >(tee -a "${LOG}") 2>&1
 FAILS=()
 EGRESS=""
 EGRESS_FAILED=0
+EGRESS_DEGRADED=0
+EGRESS_TRY_FAILS=0
 STATE_FILE="${STATE_DIR}/egress-fails"
 # Общий счётчик подряд-фейлов (любой неуспех чека) — для TG-алёрта с порогом.
 # Отдельно от egress-counter, который управляет auto-switch.
@@ -76,18 +81,33 @@ for svc in "${REQUIRED_SERVICES[@]}"; do
   fi
 done
 
-# 2. Egress через sing-box (только если sing-box жив)
+# 2. Egress через sing-box (только если sing-box жив).
+# Ретрай ВНУТРИ проверки: апстрим vpnd.io периодически роняет VLESS-соединение
+# (outbound EOF), одиночная осечка не должна считаться egress-провалом и крутить
+# auto-switch/alert-счётчики. Успех = любая из EGRESS_TRIES попыток.
 if [[ "${SINGBOX_ALIVE}" -eq 1 ]]; then
-  EGRESS="$(curl -fsS --max-time "${CURL_TIMEOUT}" \
-            --proxy "socks5h://127.0.0.1:${SOCKS_PORT}" \
-            "${TEST_URL}" 2>/dev/null || true)"
-  EGRESS="${EGRESS//[$'\t\r\n ']}"
+  for ((et = 1; et <= EGRESS_TRIES; et++)); do
+    EGRESS="$(curl -fsS --max-time "${CURL_TIMEOUT}" \
+              --proxy "socks5h://127.0.0.1:${SOCKS_PORT}" \
+              "${TEST_URL}" 2>/dev/null || true)"
+    EGRESS="${EGRESS//[$'\t\r\n ']}"
+    # Чистый успех (вернулось и это не WAN-IP) — выходим из ретрая.
+    [[ -n "${EGRESS}" && "${EGRESS}" != "${SERVER_IP}" ]] && break
+    EGRESS_TRY_FAILS=$(( EGRESS_TRY_FAILS + 1 ))
+    [[ "${et}" -lt "${EGRESS_TRIES}" ]] && sleep "${EGRESS_RETRY_DELAY}"
+  done
   if [[ -z "${EGRESS}" ]]; then
-    fail "egress: curl через socks5h://127.0.0.1:${SOCKS_PORT} ничего не вернул"
+    fail "egress: curl через socks5h://127.0.0.1:${SOCKS_PORT} ничего не вернул (${EGRESS_TRIES} попыток)"
     EGRESS_FAILED=1
   elif [[ "${EGRESS}" == "${SERVER_IP}" ]]; then
     fail "egress: трафик уходит напрямую через WAN (${EGRESS} == server_public_ip)"
     EGRESS_FAILED=1
+  elif [[ "${EGRESS_DEGRADE_FAILS}" -gt 0 && "${EGRESS_TRY_FAILS}" -ge "${EGRESS_DEGRADE_FAILS}" ]]; then
+    # Egress В ИТОГЕ прошёл, но мимо ушло ≥ порога попыток → нода деградирует.
+    # НЕ алертим и НЕ копим alert-счётчик (egress работает), но кормим
+    # счётчик auto-switch, чтобы полудохлая нода всё равно ротировалась.
+    EGRESS_DEGRADED=1
+    echo "$(date -u +%FT%TZ) selfcheck: egress деградирует (${EGRESS_TRY_FAILS}/${EGRESS_TRIES} попыток мимо, egress=${EGRESS})" >&2
   fi
 fi
 
@@ -137,15 +157,17 @@ for iface in "${CAPTURE_IFACES[@]}"; do
   fi
 done
 
-# ── Auto-recovery: state-counter подряд egress-провалов ──────────────
+# ── Auto-recovery: state-counter подряд egress-провалов/деградаций ────
 # Считаем только когда успели сделать сам egress-check (sing-box был жив).
+# Триггерит и полный провал (EGRESS_FAILED), и частичная деградация
+# (EGRESS_DEGRADED) — иначе полудохлая нода прячется за ретраем и не ротируется.
 if [[ "${SINGBOX_ALIVE}" -eq 1 ]]; then
-  if [[ "${EGRESS_FAILED}" -eq 1 ]]; then
+  if [[ "${EGRESS_FAILED}" -eq 1 || "${EGRESS_DEGRADED}" -eq 1 ]]; then
     FAILS_PREV="$(read_state)"
     FAILS_CUR=$(( FAILS_PREV + 1 ))
     write_state "${FAILS_CUR}"
     if [[ "${AUTO_SWITCH}" == "1" && "${FAILS_CUR}" -ge "${AUTO_SWITCH_THRESHOLD}" ]]; then
-      echo "$(date -u +%FT%TZ) selfcheck: ${FAILS_CUR} подряд egress-провалов → запускаю ${RECOVER_PATH}" >&2
+      echo "$(date -u +%FT%TZ) selfcheck: ${FAILS_CUR} подряд egress-провалов/деградаций → запускаю ${RECOVER_PATH}" >&2
       if "${RECOVER_PATH}" "${RECOVER_MAX_TRIES}" >&2; then
         write_state 0
         FAILS+=("auto-recover: переключились на резервную ноду")
