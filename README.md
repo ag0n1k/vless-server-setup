@@ -12,8 +12,8 @@ VPN-клиент, выход в интернет — через прокси с 
                                 для жёстких whitelist'ов)
 ```
 
-Стенд управляется через **Ansible**. Боевой хост: `194.87.99.207` (RuVDS,
-Ubuntu 24.04). См. `docs/wdtt-analysis.md` — отдельный анализ родственного
+Стенд управляется через **Ansible**. Боевой хост: `vpn2` — `185.251.88.228`
+(Ubuntu 26.04). См. `docs/wdtt-analysis.md` — отдельный анализ родственного
 проекта WDTT (proxy через VK-инфру).
 
 ---
@@ -46,7 +46,7 @@ echo 'мой-пароль-vault' > .vault_pass
 chmod 600 .vault_pass
 ansible-vault encrypt ansible/inventory/group_vars/all/vault.yml --vault-password-file=.vault_pass
 
-# 4. Открыть в панели RuVDS firewall: UDP 56000 на вход
+# 4. Открыть в панели хостера (firewall VPS): UDP 56000 на вход
 
 # 5. Проверка → план → применение
 make check
@@ -100,12 +100,12 @@ ansible-playbook ansible/playbooks/add-wg-peer.yml -e name=phone -e wg_ip=10.188
 
 ```
 ansible/
-├── inventory/hosts.yml         — один хост vpn1
+├── inventory/hosts.yml         — хост vpn2
 ├── group_vars/all/
 │   ├── vars.yml                — открытые параметры (порты, подсети)
 │   ├── vault.yml               — секреты (gitignore'd)
 │   └── vault.yml.example       — шаблон
-├── host_vars/vpn1/vars.yml     — параметры хоста (public ip, WAN iface)
+├── host_vars/vpn2/vars.yml     — параметры хоста (public ip, WAN iface)
 ├── state/
 │   ├── ovpn_peers.yml          — список OVPN-клиентов и CCD
 │   └── wg_peers.yml            — публичные ключи и AllowedIPs WG-пиров
@@ -126,14 +126,11 @@ ansible/
     └── tproxy/                 — единая nft-таблица для tun0+wg0+wdtt0, leak-guard
 ```
 
-Старые shell-скрипты — в `legacy/` (как документация прежней схемы).
-
 ---
 
 ## Гарантии идемпотентности и сохранности
 
-Чтобы не сломать живой хост (там 7 OVPN-клиентов и 2 WG-пира с
-суммарным трафиком ~70 ГБ/день):
+Чтобы не сломать живой хост (продакшн с боевыми OVPN/WG-клиентами):
 
 - **PKI** — `easyrsa init-pki` запускается только если `pki/ca.crt` отсутствует.
   Существующие клиентские ключи никогда не трогаются.
@@ -163,15 +160,13 @@ fail2ban-client status sshd
 
 # проверка прокси работает
 curl --proxy socks5h://127.0.0.1:1080 https://api.ipify.org
-# должен показать IP текущей ноды (ch-3-tun.vpnd.io и т.п.), а не 194.87.99.207
+# должен показать IP текущей ноды (vpnd.io), а не 185.251.88.228
 ```
 
 ---
 
 ## Что НЕ управляется через Ansible
 
-- `vpsguard.service` — агент хостера RuVDS (`/usr/bin/vpsguard`).
-  Не трогаем.
 - Телеграм-бот для генерации одноразовых паролей — отсутствует
   (был в WDTT-проекте, тут не используется).
 - Бэкапы PKI — в roadmap.

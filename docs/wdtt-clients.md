@@ -1,6 +1,6 @@
 # WDTT-клиенты для iPhone, macOS, Android
 
-Контекст: на vpn1 поднят `vk-turn-proxy` сервер (`roles/wdtt/`), который
+Контекст: на vpn2 поднят `vk-turn-proxy` сервер (`roles/wdtt/`), который
 слушает 56000/udp DTLS-эндпойнт и форвардит распакованный WG-payload
 на локальный `wg1` (10.66.66.0/24). С устройства, сидящего за DPI с
 белым списком VK CDN, нужно поднять WireGuard-туннель, инкапсулированный
@@ -18,10 +18,10 @@
 [VK TURN relay]
      │
      ▼  UDP/56000
-[vpn1:56000 vk-turn-proxy сервер]
+[vpn2:56000 vk-turn-proxy сервер]
      │
      ▼  127.0.0.1:51821
-[wg1 на vpn1] → TPROXY → sing-box → vpnd.io → интернет
+[wg1 на vpn2] → TPROXY → sing-box → vpnd.io → интернет
 ```
 
 Upstream-проект: <https://github.com/cacggghp/vk-turn-proxy> v1.8.x.
@@ -36,8 +36,8 @@ Upstream-проект: <https://github.com/cacggghp/vk-turn-proxy> v1.8.x.
    - «Скопировать ссылку приглашения» → `https://vk.com/call/join/<hash>`
    - **звонок НЕ закрывать** — ссылка валидна, пока никто не нажмёт
      «Завершить для всех»
-3. **Координаты vpn1**:
-   - host: `194.87.99.207`
+3. **Координаты vpn2**:
+   - host: `185.251.88.228`
    - external port: `56000/udp`
 4. **WG-конфиг для wg1**, сгенерированный на твоей машине:
    ```bash
@@ -69,7 +69,7 @@ Upstream-проект: <https://github.com/cacggghp/vk-turn-proxy> v1.8.x.
 - WG-конфиг: импортировать `.local-peers/wdtt/myiphone.conf` (QR или
   файл)
 - VK invite link: `https://vk.com/call/join/<hash>`
-- TURN server: `194.87.99.207:56000`
+- TURN server: `185.251.88.228:56000`
 - Streams: 9 или 18 (увеличивай до 18 если канал стабильный)
 - Captcha: WebView (ручной слайдер) надёжнее автоматики
 
@@ -102,7 +102,7 @@ git clone https://github.com/cacggghp/vk-turn-proxy
 cd vk-turn-proxy/client
 go build -o vk-turn-client
 sudo ./vk-turn-client \
-  -peer 194.87.99.207:56000 \
+  -peer 185.251.88.228:56000 \
   -vk "https://vk.com/call/join/<hash>" \
   -listen 127.0.0.1:9000 \
   -workers 18
@@ -138,14 +138,14 @@ sudo ./vk-turn-client \
 # 1. На клиенте: внешний IP должен быть от vpnd.io-ноды
 curl https://api.ipify.org
 # ожидаем IP ноды vpnd.io (ch-3-tun.vpnd.io / uk-2 / au-1 — текущая
-# из make status), не 194.87.99.207 и не мобильный.
+# из make status), не 185.251.88.228 и не мобильный.
 
 # 2. На клиенте: доступ к VPS-сети
-ping 10.66.66.1   # это wg1 на vpn1
+ping 10.66.66.1   # это wg1 на vpn2
 ssh root@10.66.66.1   # если хочется SSH через туннель
 
 # 3. На сервере (через ssh): проверка handshake
-ssh root@194.87.99.207
+ssh root@185.251.88.228
 wg show wg1
 journalctl -u vk-turn-proxy -n 20
 ```
@@ -161,7 +161,7 @@ journalctl -u vk-turn-proxy -n 20
 | `Quota Exceeded` (486) от TURN | VK-кредиты протухли, клиент сам ротирует; если не помогает — пересоздай хеш |
 | `journalctl -u vk-turn-proxy` показывает `connection refused` от 51821 | wg1 не поднялся — `systemctl status wg-quick@wg1` |
 | Клиент подключился, но интернета нет | TPROXY не подхватил wg1; проверь `nft list table inet vpn_tproxy` — должна быть строка про `iifname "wg1"` |
-| Скорость 0 | UDP/56000 заблокирован у RuVDS или на стороне мобильного оператора (даже в VK CDN — фильтр по портам) |
+| Скорость 0 | UDP/56000 заблокирован у хостера или на стороне мобильного оператора (даже в VK CDN — фильтр по портам) |
 
 ---
 
@@ -171,13 +171,13 @@ journalctl -u vk-turn-proxy -n 20
   ключей + опционально PSK). Если кто-то получит твой WG `peer.conf`
   и поднимет его на своём устройстве — у него будет доступ. Не теряй
   `.local-peers/wdtt/*.conf`.
-- **51821/udp на vpn1 не достижим снаружи** — закрыт nftables-DROP'ом
-  (`iifname eth0 udp dport 51821 drop` в `wdtt_input`). Только через
+- **51821/udp на vpn2 не достижим снаружи** — закрыт nftables-DROP'ом
+  (`iifname ens3 udp dport 51821 drop` в `wdtt_input`). Только через
   локальный `vk-turn-proxy` на 127.0.0.1.
 - **56000/udp принимает только от VK CDN-сетей** (`set vk_cdn_v4`
   в `wdtt_input`). Open-internet сканеры на 56000 получат drop.
 - **InsecureSkipVerify в DTLS** — это by design (self-signed), но это
-  значит MITM на участке `client ↔ VK relay ↔ vpn1` теоретически
+  значит MITM на участке `client ↔ VK relay ↔ vpn2` теоретически
   возможен. WG-handshake поверх DTLS снимает эту проблему: даже
   если кто-то проксирует пакеты, без приватного ключа клиента
   валидной WG-сессии не будет.

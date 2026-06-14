@@ -1,5 +1,5 @@
 ---
-# OpenVPN-клиенты на vpn2. Структура идентична host_vars/vpn1/ovpn_peers.yml.
+# OpenVPN-клиенты на vpn2.
 # Источник правды по PKI — сам сервер vpn2.
 #
 # Пример записи:

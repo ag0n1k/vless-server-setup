@@ -5,7 +5,7 @@
 #   [VK TURN]──DTLS──> 0.0.0.0:56000 (vk-turn-proxy server)
 #                         │
 #                         ▼ UDP 127.0.0.1:51821
-#                      [wg1 интерфейс на vpn1]
+#                      [wg1 интерфейс на vpn2]
 #                         │
 #                         ▼ tproxy → sing-box → vpnd.io
 #
@@ -30,7 +30,7 @@ vkturn_log_dir: /var/log/vk-turn-proxy
 vkturn_listen: "0.0.0.0:{{ wdtt_external_port }}"
 vkturn_external_port: 56000
 
-# Внутренний WG (отдельный от существующего wg0). vpn1 будет иметь
+# Внутренний WG (отдельный от существующего wg0). Хост имеет
 # два WG-интерфейса:
 #   wg0  → 10.188.0.0/24, listen 51820, site-to-site (giga, hopper)
 #   wg1  → 10.66.66.0/24, listen 51821 (только локально), для VK-туннеля

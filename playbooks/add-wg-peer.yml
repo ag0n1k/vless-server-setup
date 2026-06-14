@@ -14,8 +14,8 @@
     name: ""
     wg_ip: ""
     site_lan: ""
-    # На какой сервер цепляться (имя из inventory). По умолчанию vpn1.
-    vpn_server: vpn1
+    # На какой сервер цепляться (имя из inventory). По умолчанию vpn2.
+    vpn_server: vpn2
     out_dir: "{{ playbook_dir }}/../.local-peers/{{ vpn_server }}"
 
   tasks:

@@ -2,7 +2,7 @@
 
 ANSIBLE       ?= ansible-playbook
 INV           ?= inventory/hosts.yml
-# HOST: ограничить выполнение конкретным хостом из inventory (vpn1, vpn2, ...).
+# HOST: ограничить выполнение конкретным хостом из inventory (vpn2, ...).
 #   make apply HOST=vpn2
 # Пусто = все хосты из site.yml.
 HOST          ?=

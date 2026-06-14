@@ -13,8 +13,8 @@
   vars:
     name: ""
     wg_ip: ""
-    # На какой сервер цепляться (имя из inventory). По умолчанию vpn1.
-    vpn_server: vpn1
+    # На какой сервер цепляться (имя из inventory). По умолчанию vpn2.
+    vpn_server: vpn2
     out_dir: "{{ playbook_dir }}/../.local-peers/wdtt/{{ vpn_server }}"
     # Endpoint в WG-конфиге клиента — это локальный listener vk-turn-proxy
     # на стороне устройства. По соглашению cacggghp README: 127.0.0.1:9000.
