@@ -9,7 +9,7 @@
   tasks:
     - name: Скачать и распарсить подписки
       ansible.builtin.command: >-
-        /usr/local/lib/sb_parse_subs.py "{{ vault_subscription_urls }}" "/etc/sing-box/nodes.json"
+        /usr/local/lib/sb_parse_subs.py "{{ vault_subscription_urls }}" "/etc/sing-box/nodes.json" "{{ sb_default_flow | default('') }}"
       register: parse_out
       no_log: true
 

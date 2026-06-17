@@ -190,6 +190,7 @@
 
       urls = sys.argv[1].split()
       out_path = sys.argv[2]
+      default_flow = sys.argv[3] if len(sys.argv) > 3 else ""
       links = []
       for url in urls:
           try:
@@ -201,6 +202,9 @@
       for l in links:
           n = parse_one(l)
           if not n: continue
+          # vpnd.io raw-экспорт не отдаёт flow, но сервер ждёт XTLS-Vision.
+          if n.get("type") == "vless" and not n.get("flow") and default_flow:
+              n["flow"] = default_flow
           k = (n.get("server",""), n.get("port",0), n.get("uuid") or n.get("password") or "")
           if k in seen: continue
           seen.add(k); nodes.append(n)
@@ -243,7 +247,7 @@
 
 - name: Первичная загрузка нод (только если nodes.json отсутствует)
   ansible.builtin.command: >-
-    /usr/local/lib/sb_parse_subs.py "{{ vault_subscription_urls }}" "{{ sb_nodes }}"
+    /usr/local/lib/sb_parse_subs.py "{{ vault_subscription_urls }}" "{{ sb_nodes }}" "{{ sb_default_flow | default('') }}"
   when: not _sb_nodes_stat.stat.exists
   no_log: true
 
@@ -341,7 +345,7 @@
 
       [Service]
       Type=oneshot
-      ExecStart=/bin/bash -c '/usr/local/lib/sb_parse_subs.py "$(cat {{ sb_subs_list }})" {{ sb_nodes }}'
+      ExecStart=/bin/bash -c '/usr/local/lib/sb_parse_subs.py "$(cat {{ sb_subs_list }})" {{ sb_nodes }} "{{ sb_default_flow | default('') }}"'
       Nice=10
   notify:
     - reload systemd

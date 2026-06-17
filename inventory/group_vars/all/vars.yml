@@ -29,6 +29,11 @@ singbox_socks_port: 1080
 singbox_tproxy_port: 7895
 singbox_log_level: info
 # Источник субскрипции хранится в vault: subscription_urls.
+# Дефолтный flow для vless-узлов, у которых подписка не отдала flow.
+# vpnd.io raw-экспорт (type=raw, security=tls) приходит без &flow=,
+# но сервер — XTLS-Vision за nginx и без flow рвёт VLESS-поток (EOF).
+# Подставляется в sb_parse_subs.py только когда flow пуст. Пусто = выкл.
+sb_default_flow: xtls-rprx-vision
 
 # TPROXY ─────────────────────────────────────────────────────────────
 # Интерфейсы, чьи пакеты заворачиваются в sing-box (входящие).

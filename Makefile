@@ -10,7 +10,12 @@ HOST          ?=
 # Можно переопределить через `make apply VAULT_PASS=/path/to/file`.
 VAULT_PASS    ?=
 SKIP_TAGS     ?=
-ANSIBLE_FLAGS ?= $(if $(VAULT_PASS),--vault-password-file=$(VAULT_PASS)) \
+# Verbose + diff по умолчанию для всех таргетов. Переопределяется:
+#   make apply V=-vvv     — больше детализации
+#   make apply V=         — без verbose
+V             ?= -Dv
+ANSIBLE_FLAGS ?= $(V) \
+                 $(if $(VAULT_PASS),--vault-password-file=$(VAULT_PASS)) \
                  $(if $(SKIP_TAGS),--skip-tags=$(SKIP_TAGS)) \
                  $(if $(HOST),-l $(HOST))
 
