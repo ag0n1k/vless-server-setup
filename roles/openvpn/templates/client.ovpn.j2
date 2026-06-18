@@ -12,6 +12,7 @@ remote-cert-tls server
 auth {{ openvpn_auth_digest }}
 cipher {{ openvpn_cipher }}
 data-ciphers {{ openvpn_data_ciphers }}
+replay-window {{ openvpn_replay_window }}
 verb 3
 
 <ca>

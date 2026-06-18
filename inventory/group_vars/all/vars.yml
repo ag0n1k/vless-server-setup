@@ -17,6 +17,13 @@ openvpn_cipher: AES-256-GCM
 openvpn_data_ciphers: AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
 openvpn_auth_digest: SHA256
 openvpn_keepalive: "10 120"
+# Расширенное anti-replay окно: "размер_пакетов backtrack_сек".
+# Дефолт OpenVPN 64/15 слишком узок для длинных UDP-сессий, проходящих
+# через sing-box → vpnd: смена upstream-ноды даёт реордеринг пакетов,
+# узкое окно режет их как replay (AEAD bad packet ID) и валит туннель.
+# 512/60 переживает такой реордер. Применяется на обоих концах
+# (приёмник локален) — серверный server.conf и клиентский .ovpn.
+openvpn_replay_window: "512 60"
 
 # WireGuard ──────────────────────────────────────────────────────────
 wg_interface: wg0

@@ -25,6 +25,7 @@ push "dhcp-option DNS {{ dns }}"
 cipher {{ openvpn_cipher }}
 data-ciphers {{ openvpn_data_ciphers }}
 auth {{ openvpn_auth_digest }}
+replay-window {{ openvpn_replay_window }}
 
 # PKI
 ca {{ ovpn_keys_dir }}/ca.crt
