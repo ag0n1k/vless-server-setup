@@ -28,7 +28,17 @@ ensure_rt_table() {
 }
 
 ensure_rule() {
-  # Снести все совпадающие правила, затем добавить ровно одно — без дублей.
+  # Check-then-act: если ровно одно правило уже стоит с нужным pref — не трогаем.
+  # Why: скрипт зовётся не только при буте, но и из selfcheck-autoheal, то есть
+  # регулярно. Безусловный del→add открывал бы на каждом прогоне микроокно, в
+  # котором помеченные пакеты клиентов некуда направить.
+  local dump
+  dump="$(ip -4 rule show 2>/dev/null || true)"
+  if [[ "$(grep -cE "^${PREF}:.*fwmark ${FWMARK_HEX} lookup ${RT_TABLE}" <<<"${dump}")" == "1" ]]; then
+    return 0
+  fi
+  # Иначе приводим к норме: снести все совпадающие (в том числе дубли и правила
+  # с чужим pref), затем добавить ровно одно.
   while ip -4 rule show | grep -qE "fwmark ${FWMARK_HEX} lookup ${RT_TABLE}"; do
     ip -4 rule del fwmark "${FWMARK}" lookup "${RT_TABLE}" || break
   done

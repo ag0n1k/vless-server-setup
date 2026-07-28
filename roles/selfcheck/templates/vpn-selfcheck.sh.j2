@@ -10,6 +10,8 @@
 # Дополнительно:
 #   - при N подряд egress-провалах и AUTO_SWITCH=1 — дёргает sb_recover.py
 #     (rotation next-нод).
+#   - при пропаже ip rule/route и AUTOHEAL_TPROXY=1 — дёргает tproxy-routing.sh up
+#     и перепроверяет; успешный heal не считается провалом (только лог).
 #   - при ALERT_THRESHOLD подряд-фейлов любого типа — зовёт notify-tg.sh
 #     один раз за инцидент, recovery-сообщение шлёт при первом OK.
 # Exit 0 — всё ок, 1 — есть провалы (список в stderr).
@@ -36,6 +38,8 @@ AUTO_SWITCH="{{ '1' if selfcheck_auto_switch_enabled else '0' }}"
 AUTO_SWITCH_THRESHOLD="{{ selfcheck_auto_switch_threshold }}"
 RECOVER_PATH="{{ selfcheck_recover_path }}"
 RECOVER_MAX_TRIES="{{ selfcheck_recover_max_tries }}"
+AUTOHEAL_TPROXY="{{ '1' if selfcheck_tproxy_autoheal_enabled else '0' }}"
+TPROXY_ROUTING_SCRIPT="{{ selfcheck_tproxy_routing_script }}"
 
 LOG="{{ selfcheck_log_path }}"
 ALERT_THRESHOLD="{{ selfcheck_alert_threshold }}"
@@ -59,6 +63,9 @@ STATE_FILE="${STATE_DIR}/egress-fails"
 # Отдельно от egress-counter, который управляет auto-switch.
 GENERAL_STATE_FILE="${STATE_DIR}/general-fails"
 NOTIFIED_FLAG="${STATE_DIR}/notified"
+# Накопительный счётчик успешных autoheal-ов policy-routing: heal не считается
+# FAIL, поэтому это единственный след того, как часто правило вообще пропадает.
+HEAL_STATE_FILE="${STATE_DIR}/tproxy-heals"
 
 fail() { FAILS+=("$1"); }
 
@@ -131,13 +138,54 @@ done
 # `if ! pipe` ЛОЖНО срабатывает как «правила нет». Флапает ~50/50, когда
 # правило реально присутствует. (Тот же безопасный паттерн — в проверке #6.)
 FWMARK_HEX="$(printf '0x%x' "${FWMARK}")"
-RULE_DUMP="$(ip -4 rule show 2>/dev/null || true)"
-if ! grep -qE "fwmark ${FWMARK_HEX} lookup ${RT_TABLE}" <<<"${RULE_DUMP}"; then
-  fail "ip rule: нет 'fwmark ${FWMARK_HEX} lookup ${RT_TABLE}'"
+
+rule_present() {
+  local dump
+  dump="$(ip -4 rule show 2>/dev/null || true)"
+  grep -qE "fwmark ${FWMARK_HEX} lookup ${RT_TABLE}" <<<"${dump}"
+}
+route_present() {
+  local dump
+  dump="$(ip route show table "${RT_TABLE}" 2>/dev/null || true)"
+  grep -qE '^local default dev lo' <<<"${dump}"
+}
+
+RULE_OK=0; rule_present && RULE_OK=1
+ROUTE_OK=0; route_present && ROUTE_OK=1
+
+# Autoheal: policy-routing живёт только в памяти ядра, а tproxy-routing.service
+# (oneshot + RemainAfterExit) не замечает, что правило сняли извне. Чиним сами —
+# скрипт идемпотентный, ставит ровно одно правило. FAIL и TG-алёрт остаются
+# только если восстановить не удалось; успешный heal громко пишем в лог, чтобы
+# инцидент не растворился в тишине.
+if [[ "${AUTOHEAL_TPROXY}" == "1" && ( "${RULE_OK}" -eq 0 || "${ROUTE_OK}" -eq 0 ) ]]; then
+  if [[ -x "${TPROXY_ROUTING_SCRIPT}" ]]; then
+    MISSING=""
+    [[ "${RULE_OK}" -eq 0 ]] && MISSING="ip rule fwmark ${FWMARK_HEX}"
+    [[ "${ROUTE_OK}" -eq 0 ]] && MISSING="${MISSING:+${MISSING}, }local default dev lo в table ${RT_TABLE}"
+    echo "$(date -u +%FT%TZ) selfcheck: tproxy policy-routing потерян (${MISSING}) → autoheal ${TPROXY_ROUTING_SCRIPT} up" >&2
+    if "${TPROXY_ROUTING_SCRIPT}" up >&2; then
+      RULE_OK=0; rule_present && RULE_OK=1
+      ROUTE_OK=0; route_present && ROUTE_OK=1
+      if [[ "${RULE_OK}" -eq 1 && "${ROUTE_OK}" -eq 1 ]]; then
+        HEALS_PREV=0
+        [[ -r "${HEAL_STATE_FILE}" ]] && HEALS_PREV="$(cat "${HEAL_STATE_FILE}" 2>/dev/null || echo 0)"
+        mkdir -p "${STATE_DIR}"
+        echo $(( HEALS_PREV + 1 )) >"${HEAL_STATE_FILE}"
+        echo "$(date -u +%FT%TZ) selfcheck: autoheal OK — policy-routing восстановлен (всего heal-ов: $(( HEALS_PREV + 1 )))" >&2
+      fi
+    else
+      echo "$(date -u +%FT%TZ) selfcheck: autoheal провалился (${TPROXY_ROUTING_SCRIPT} up вернул ошибку)" >&2
+    fi
+  else
+    echo "$(date -u +%FT%TZ) selfcheck: autoheal пропущен — ${TPROXY_ROUTING_SCRIPT} не исполняемый" >&2
+  fi
 fi
 
-ROUTE_DUMP="$(ip route show table "${RT_TABLE}" 2>/dev/null || true)"
-if ! grep -qE '^local default dev lo' <<<"${ROUTE_DUMP}"; then
+if [[ "${RULE_OK}" -eq 0 ]]; then
+  fail "ip rule: нет 'fwmark ${FWMARK_HEX} lookup ${RT_TABLE}'"
+fi
+if [[ "${ROUTE_OK}" -eq 0 ]]; then
   fail "ip route: в table ${RT_TABLE} нет 'local default dev lo'"
 fi
 

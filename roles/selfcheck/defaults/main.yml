@@ -39,6 +39,18 @@ selfcheck_nft_tables:
 # State-каталог для счётчика подряд-провалов egress
 selfcheck_state_dir: /var/lib/vpn-selfcheck
 
+# Autoheal TPROXY policy-routing: если ip rule fwmark и/или local-route в таблице
+# tproxy пропали — дёрнуть идемпотентный tproxy-routing.sh up и перепроверить.
+# Why: tproxy-routing.service — oneshot с RemainAfterExit=yes, поэтому systemd
+# считает себя успешным навсегда, а само правило живёт только в памяти ядра и
+# может быть снято извне (ручной ip rule del, передёргивание сети). Ровно так
+# 2026-07-28 отвалился split-tunnel: nft метил пакеты, юнит показывал
+# active (exited), а направить помеченный трафик в sing-box было нечем.
+# Восстановление безопасное и локальное (одно ip rule add), поэтому включено
+# по умолчанию — в отличие от auto-switch, который меняет ноду.
+selfcheck_tproxy_autoheal_enabled: true
+selfcheck_tproxy_routing_script: "{{ tproxy_routing_script | default('/usr/local/sbin/tproxy-routing.sh') }}"
+
 # Auto-recovery: при N подряд egress-провалах дёрнуть локальный
 # sb_recover.py (rotation next-нод). По умолчанию выключено —
 # включается per-host через host_vars.
