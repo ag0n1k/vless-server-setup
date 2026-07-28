@@ -9,3 +9,11 @@ tproxy_rt_rule_pref: 100
 # вместе с nftables (runtime-команды ip rule/route ребут не переживают).
 tproxy_routing_script: /usr/local/sbin/tproxy-routing.sh
 tproxy_routing_unit: tproxy-routing.service
+
+# systemd-networkd по умолчанию (ManageForeignRoutingPolicyRules=yes) вычищает
+# при старте все ip rule, которые создал не он — включая наше fwmark-правило.
+# Так 2026-07-28 отвалился split-tunnel: unattended-upgrade обновил libc6 →
+# перезапустил systemd-networkd → правило снято, nft продолжил метить пакеты.
+# Drop-in запрещает networkd трогать чужие rules.
+tproxy_networkd_keep_foreign_rules: true
+tproxy_networkd_dropin_path: /etc/systemd/networkd.conf.d/10-tproxy-keep-rules.conf

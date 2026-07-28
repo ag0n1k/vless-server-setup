@@ -3,10 +3,13 @@
 Description=TPROXY policy routing (ip rule fwmark + local route) for sing-box
 Documentation=man:ip-rule(8)
 # Ждём сеть, поднимаемся после nftables (правила маркировки) и sing-box.
-After=network-online.target nftables.service sing-box.service
+After=network-online.target nftables.service sing-box.service systemd-networkd.service
 Wants=network-online.target
 # Если кто-то рестартит nftables — контекст tproxy переустановится вместе с ним.
-PartOf=nftables.service
+# systemd-networkd в списке потому, что его рестарт (например при обновлении
+# libc через unattended-upgrade) сносит наше fwmark-правило: для networkd оно
+# чужое. PartOf= поднимает нас вслед за ним, не дожидаясь selfcheck-autoheal.
+PartOf=nftables.service systemd-networkd.service
 
 [Service]
 Type=oneshot

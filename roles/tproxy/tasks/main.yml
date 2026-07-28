@@ -20,6 +20,31 @@
 # пакеты, а направить их в таблицу tproxy было нечем). Теперь единый
 # источник правды — скрипт + oneshot-юнит, который восстанавливает их
 # при буте и вместе с nftables.
+# Первая линия обороны: networkd вообще не должен снимать наше ip rule.
+# Настройка читается только при старте networkd, поэтому здесь мы её кладём,
+# но networkd НЕ рестартуем — на боевом шлюзе это лишний риск разрыва ens3.
+# До следующего рестарта networkd правило прикрыто PartOf= в tproxy-routing
+# (вернётся вместе с networkd) и autoheal-ом в vpn-selfcheck.
+- name: Каталог drop-in для systemd-networkd
+  ansible.builtin.file:
+    path: "{{ tproxy_networkd_dropin_path | dirname }}"
+    state: directory
+    mode: "0755"
+  when: tproxy_networkd_keep_foreign_rules
+
+- name: Запретить systemd-networkd вычищать чужие ip rule
+  ansible.builtin.copy:
+    dest: "{{ tproxy_networkd_dropin_path }}"
+    mode: "0644"
+    content: |
+      # Ansible managed
+      # Не удалять ip rule, созданные не networkd: policy-routing tproxy
+      # (fwmark {{ tproxy_fwmark }} -> table {{ tproxy_rt_table_name }}) ставит
+      # tproxy-routing.service, и рестарт networkd не должен его сносить.
+      [Network]
+      ManageForeignRoutingPolicyRules=no
+  when: tproxy_networkd_keep_foreign_rules
+
 - name: Скрипт persistence для tproxy policy-routing
   ansible.builtin.template:
     src: tproxy-routing.sh.j2
