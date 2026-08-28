@@ -8,3 +8,10 @@ ovpn_log_dir: /var/log/openvpn
 
 # Куда складывать сгенерированные .ovpn (только если CN явно запрошен).
 ovpn_clients_out_dir: /root/ovpn-clients
+
+# Site-to-site. Списки CIDR; пусто = обычный remote-access сервер.
+#   openvpn_routes      — LAN за OVPN-клиентами: ставит route в ядро сервера
+#                         (парой к iroute в CCD соответствующего пира).
+#   openvpn_push_routes — что раздать OVPN-клиентам: чужие LAN и VPN-подсети.
+openvpn_routes: []
+openvpn_push_routes: []

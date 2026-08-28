@@ -15,6 +15,13 @@
 ovpn_peers:
   - cn: fast-hopper
     state: present
+    # Site-to-site: роутер LAN-A. fixed_ip нужен, чтобы iroute всегда
+    # соответствовал одному и тому же концу туннеля. .200 — заведомо выше
+    # зоны, которую сервер раздаёт динамически телефонам (.2 и дальше).
+    fixed_ip: "{{ hopper_vpn_ip }}"
+    iroute:
+      - 192.168.1.0/24
+    note: "router LAN-A (192.168.1.0/24)"
   - cn: iphone-ag0n1k
     state: present
   - cn: iphone-olga

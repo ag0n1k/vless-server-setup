@@ -12,6 +12,19 @@ VPN-клиент, выход в интернет — через прокси с 
                                 для жёстких whitelist'ов)
 ```
 
+Дополнительно vpn2 работает транзитом между двумя площадками (site-to-site):
+
+```
+LAN-A 192.168.1.0/24 ──[hopper]──ovpn/tun0──┐
+                                            ├── vpn2 (роутинг, без NAT)
+LAN-B 192.168.2.0/24 ──[giga]────wg/wg0─────┘
+```
+
+Межсетевой трафик в sing-box не заворачивается: в `vpn_tproxy` правило
+`ip daddr { 10/8, 172.16/12, 192.168/16 } accept` стоит раньше TPROXY.
+Подробности и параметры — `inventory/host_vars/vpn2/vars.yml`
+(`lan_hopper`, `lan_giga`, `openvpn_routes`, `openvpn_push_routes`).
+
 Стенд управляется через **Ansible**. Боевой хост: `vpn2` — `185.251.88.228`
 (Ubuntu 26.04). См. `docs/wdtt-analysis.md` — отдельный анализ родственного
 проекта WDTT (proxy через VK-инфру).

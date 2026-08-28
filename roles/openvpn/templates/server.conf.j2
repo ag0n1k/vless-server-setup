@@ -1,3 +1,19 @@
+{#- CIDR → "адрес маска" для директив route/push route.
+    netaddr в venv нет, поэтому маска считается вручную (та же логика,
+    что в ccd-peer.j2 для iroute). -#}
+{%- macro ovpn_route(net) -%}
+{%- set parts = net.split('/') -%}
+{%- set bits = parts[1] | int -%}
+{%- set octets = [] -%}
+{%- for i in range(4) -%}
+  {%- set b = bits - i * 8 -%}
+  {%- if b >= 8 -%}{{ octets.append(255) or '' }}
+  {%- elif b > 0 -%}{{ octets.append(256 - (2 ** (8 - b)) | int) or '' }}
+  {%- else -%}{{ octets.append(0) or '' }}
+  {%- endif -%}
+{%- endfor -%}
+{{ parts[0] }} {{ octets | join('.') }}
+{%- endmacro -%}
 port {{ openvpn_port }}
 proto {{ openvpn_proto }}
 dev tun
@@ -15,8 +31,40 @@ client-config-dir {{ ovpn_ccd_dir }}
 topology subnet
 server {{ openvpn_subnet_addr }} {{ openvpn_subnet_mask }}
 
+# Site-to-site: маршруты в ядро сервера (за какими клиентами лежат LAN).
+# Одного iroute в CCD мало — без route ядро vpn2 не отдаст пакет демону.
+#
+# Элемент — строка "CIDR" либо mapping {net: CIDR, gw: IP}. Без gw OpenVPN
+# ставит маршрут через первый адрес пула (10.88.0.2), и когда роутер
+# площадки отключится, останется только этот маршрут — трафик к чужой LAN
+# поедет к тому клиенту, которому пул выдал .2. С gw = fixed_ip роутера
+# оба маршрута (этот и learn'нутый из iroute) смотрят в одну точку,
+# а при отключённом роутере пакеты просто дропаются.
+{% for r in openvpn_routes | default([]) %}
+route {{ ovpn_route(r.net | default(r)) }}{% if r.gw is defined %} {{ r.gw }}{% endif %}
+
+{% endfor %}
+
 # Full-tunnel + DNS
 push "redirect-gateway def1 bypass-dhcp"
+
+# Site-to-site: маршруты, которые сервер раздаёт OVPN-клиентам.
+# Доезжают ТОЛЬКО при реконнекте клиента — после правки дёрнуть hopper.
+#
+# LAN за самим OVPN-плечом сюда не кладём. У телефона, физически стоящего
+# в этой сети, маршрут через tun конкурировал бы с локальным той же длины
+# префикса: кто победит — зависит от метрик и от клиента (iOS/Android/
+# desktop ведут себя по-разному). Выиграет tun — трафик к соседнему
+# принтеру пойдёт крюком через vpn2 и умрёт вместе с туннелем.
+# Роутеру своей площадки этот маршрут и так не нужен — он в этой сети.
+#
+# У WireGuard механизма push нет вообще: аналогичное решение принимается
+# в клиентском конфиге (AllowedIPs), см. playbooks/add-wg-peer.yml —
+# параметры site_lan (сеть ЗА пиром → серверный wg_peers.yml) и
+# remote_lans (чужие сети → клиентский AllowedIPs).
+{% for net in openvpn_push_routes | default([]) %}
+push "route {{ ovpn_route(net) }}"
+{% endfor %}
 {% for dns in openvpn_dns %}
 push "dhcp-option DNS {{ dns }}"
 {% endfor %}

@@ -4,8 +4,16 @@
 #
 # Вызов:
 #   ansible-playbook add-wg-peer.yml -e name=phone -e wg_ip=10.188.0.10
-#   ansible-playbook add-wg-peer.yml -e name=site3 -e wg_ip=10.188.0.20 -e site_lan=192.168.3.0/24
+#   ansible-playbook add-wg-peer.yml -e name=site3 -e wg_ip=10.188.0.20 \
+#       -e site_lan=192.168.3.0/24 -e remote_lans=10.88.0.0/24,192.168.1.0/24
 #   ansible-playbook add-wg-peer.yml -e name=test -e wg_ip=10.188.0.30 -e vpn_server=vpn2
+#
+# site_lan и remote_lans — РАЗНЫЕ направления, их легко перепутать:
+#   site_lan    — сеть ЗА пиром. Идёт в серверный wg_peers.yml (AllowedIPs),
+#                 чтобы vpn2 знал, кому отдавать пакеты для этой сети.
+#                 В клиентском конфиге ей делать нечего.
+#   remote_lans — чужие сети, которые пир должен видеть через туннель.
+#                 Идёт в клиентский AllowedIPs.
 
 - name: Add WireGuard peer
   hosts: localhost
@@ -13,7 +21,10 @@
   vars:
     name: ""
     wg_ip: ""
+    # Сеть за пиром — только для подсказки по wg_peers.yml (см. шапку).
     site_lan: ""
+    # Чужие сети для клиентского AllowedIPs, через запятую.
+    remote_lans: ""
     # На какой сервер цепляться (имя из inventory). По умолчанию vpn2.
     vpn_server: vpn2
     out_dir: "{{ playbook_dir }}/../.local-peers/{{ vpn_server }}"
@@ -26,6 +37,15 @@
           - wg_ip | length > 0
           - vpn_server in hostvars
         fail_msg: "Нужны -e name=<name> -e wg_ip=<ip>; vpn_server должен быть в inventory"
+
+    - name: Своя LAN не должна попасть в клиентский AllowedIPs
+      ansible.builtin.assert:
+        that:
+          - site_lan | length == 0 or site_lan not in (remote_lans.split(',') | map('trim') | list)
+        fail_msg: >-
+          site_lan={{ site_lan }} попал в remote_lans. Пир получил бы маршрут
+          на собственную сеть через туннель и потерял бы прямой доступ к ней.
+          site_lan идёт в серверный wg_peers.yml, не в клиентский конфиг.
 
     - name: Каталог для ключей
       ansible.builtin.file: { path: "{{ out_dir }}", state: directory, mode: "0700" }
@@ -59,6 +79,10 @@
         msg:
           - "Сервер: {{ vpn_server }} ({{ hostvars[vpn_server].ansible_host }})"
           - "Pubkey пира (для inventory/host_vars/{{ vpn_server }}/wg_peers.yml): {{ peer_pub }}"
+          - >-
+            {% if site_lan | length > 0 %}allowed_ips для wg_peers.yml:
+            {{ wg_ip }}/32, {{ site_lan }}{% else %}allowed_ips для
+            wg_peers.yml: {{ wg_ip }}/32{% endif %}
           - "PSK (для vault_wg_peer_psks[\"{{ peer_pub }}\"]): {{ peer_psk }}"
           - "После добавления в state — make apply HOST={{ vpn_server }}"
           - "Клиентский .conf: {{ out_dir }}/{{ name }}.conf"
@@ -77,7 +101,7 @@
           PublicKey    = {{ hostvars[vpn_server].wg_server_pubkey }}
           PresharedKey = {{ peer_psk }}
           Endpoint     = {{ hostvars[vpn_server].ansible_host }}:51820
-          AllowedIPs   = 10.188.0.0/24{% if site_lan | length > 0 %}, {{ site_lan }}{% endif %}
+          AllowedIPs   = 10.188.0.0/24{% if remote_lans | length > 0 %}, {{ remote_lans }}{% endif %}
 
           PersistentKeepalive = 25
       no_log: true

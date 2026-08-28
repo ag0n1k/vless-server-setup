@@ -17,5 +17,8 @@ wg_peers:
     pubkey: YdqSe5/kStHBYP/NlpIEAO8ZlKzxaFJo+zZUTnGM61k=
     allowed_ips:
       - 10.188.0.4/32
+      # Site-to-site: LAN-B за этим роутером. wg-quick сам поставит
+      # route 192.168.2.0/24 dev wg0 — отдельная директива не нужна.
+      - 192.168.2.0/24
     persistent_keepalive: 25
     state: present

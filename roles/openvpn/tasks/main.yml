@@ -38,6 +38,13 @@
           iifname "tun0" oifname "tun0" accept
           iifname "tun0" oifname "{{ wan_iface }}" accept
           iifname "{{ wan_iface }}" oifname "tun0" ct state established,related accept
+          # Site-to-site: OVPN-плечо <-> WG-плечо. policy тут accept, так что
+          # правила декларативные — фиксируют намерение и переживут смену
+          # политики на drop. NAT между плечами СОЗНАТЕЛЬНО не делаем:
+          # трафик идёт с настоящими src-IP, иначе на LAN-B всё приходило бы
+          # с 10.188.0.1 и фильтрация/логи по источнику стали бы бесполезны.
+          iifname "tun0" oifname "{{ wg_interface }}" accept
+          iifname "{{ wg_interface }}" oifname "tun0" accept
         }
       }
       table ip openvpn_nat {
