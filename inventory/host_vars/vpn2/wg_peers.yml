@@ -22,3 +22,19 @@ wg_peers:
       - 192.168.2.0/24
     persistent_keepalive: 25
     state: present
+
+  - name: fast-hopper
+    # Роутер LAN-A, site-to-site плечо на WireGuard.
+    #
+    # OVPN-конфигурация для этого же роутера СОЗНАТЕЛЬНО оставлена нетронутой
+    # (серт, route, iroute в CCD): откат — просто включить OpenVPN обратно
+    # на роутере, на сервере менять нечего. Пока OVPN-клиент не подключён,
+    # его маршрут на 192.168.1.0/24 неактивен (learn'ится только вместе с
+    # сессией), а статический route идёт с metric 200 против metric 0 у
+    # wg-quick — так что WG выигрывает и конфликта маршрутов нет.
+    pubkey: v/dw2OnyvT6ZYH8boZPmw+6DMkiTQzA7ZzHvl1njT1o=
+    allowed_ips:
+      - 10.188.0.5/32
+      - 192.168.1.0/24
+    persistent_keepalive: 25
+    state: present
