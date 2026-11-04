@@ -7,7 +7,10 @@
 #   4. nft-таблицы tproxy/guard на месте
 #   5. ip rule fwmark + ip route в таблице tproxy
 #   6. capture-интерфейсы up и присутствуют в правилах tproxy
+#   7. CRL OpenVPN не истёк (иначе crl-verify отвергает всех клиентов)
 # Дополнительно:
+#   - CRL истекает через < CRL_WARN_DAYS — разовое TG-предупреждение на
+#     каждый выпуск CRL, без FAIL.
 #   - при N подряд egress-провалах и AUTO_SWITCH=1 — дёргает sb_recover.py
 #     (rotation next-нод).
 #   - при пропаже ip rule/route и AUTOHEAL_TPROXY=1 — дёргает tproxy-routing.sh up
@@ -40,6 +43,8 @@ RECOVER_PATH="{{ selfcheck_recover_path }}"
 RECOVER_MAX_TRIES="{{ selfcheck_recover_max_tries }}"
 AUTOHEAL_TPROXY="{{ '1' if selfcheck_tproxy_autoheal_enabled else '0' }}"
 TPROXY_ROUTING_SCRIPT="{{ selfcheck_tproxy_routing_script }}"
+CRL_PATH="{{ selfcheck_ovpn_crl_path }}"
+CRL_WARN_DAYS="{{ selfcheck_ovpn_crl_warn_days }}"
 
 LOG="{{ selfcheck_log_path }}"
 ALERT_THRESHOLD="{{ selfcheck_alert_threshold }}"
@@ -66,6 +71,10 @@ NOTIFIED_FLAG="${STATE_DIR}/notified"
 # Накопительный счётчик успешных autoheal-ов policy-routing: heal не считается
 # FAIL, поэтому это единственный след того, как часто правило вообще пропадает.
 HEAL_STATE_FILE="${STATE_DIR}/tproxy-heals"
+# nextUpdate CRL, о котором уже предупредили. Новый выпуск CRL → другой
+# nextUpdate → предупреждение снова взведено.
+CRL_WARNED_FILE="${STATE_DIR}/crl-warned"
+CRL_WARN=""
 
 fail() { FAILS+=("$1"); }
 
@@ -205,6 +214,30 @@ for iface in "${CAPTURE_IFACES[@]}"; do
   fi
 done
 
+# 7. CRL OpenVPN. Юнит при просроченном CRL остаётся active, а клиенты
+# получают "CRL has expired" — проверка #1 этого не видит.
+if [[ -n "${CRL_PATH}" ]]; then
+  if [[ ! -r "${CRL_PATH}" ]]; then
+    fail "CRL: нет файла ${CRL_PATH} (crl-verify отвергнет всех клиентов)"
+  else
+    CRL_NEXT="$(openssl crl -in "${CRL_PATH}" -noout -nextupdate 2>/dev/null | cut -d= -f2)"
+    CRL_NEXT_TS="$(date -d "${CRL_NEXT}" +%s 2>/dev/null || true)"
+    if [[ -z "${CRL_NEXT}" || -z "${CRL_NEXT_TS}" ]]; then
+      fail "CRL: не удалось прочитать nextUpdate из ${CRL_PATH}"
+    else
+      CRL_LEFT_DAYS=$(( (CRL_NEXT_TS - $(date +%s)) / 86400 ))
+      if [[ "${CRL_NEXT_TS}" -le "$(date +%s)" ]]; then
+        fail "CRL: истёк ${CRL_NEXT} — OpenVPN отвергает всех клиентов; make apply-from ROLES=openvpn"
+      elif [[ "${CRL_LEFT_DAYS}" -lt "${CRL_WARN_DAYS}" ]]; then
+        CRL_WARN="${CRL_NEXT}"
+        echo "$(date -u +%FT%TZ) selfcheck: WARN CRL истекает через ${CRL_LEFT_DAYS} дн. (${CRL_NEXT}) — make apply-from ROLES=openvpn" >&2
+      else
+        rm -f "${CRL_WARNED_FILE}"
+      fi
+    fi
+  fi
+fi
+
 # ── Auto-recovery: state-counter подряд egress-провалов/деградаций ────
 # Считаем только когда успели сделать сам egress-check (sing-box был жив).
 # Триггерит и полный провал (EGRESS_FAILED), и частичная деградация
@@ -243,12 +276,25 @@ mkdir -p "${STATE_DIR}"
 notify() {
   # $1 — текст-причина (для лога); сам notify-tg.sh подтянет journal-tail
   local reason="$1"
+  # rc=1 только если отправка реально упала (нет notify-tg.sh = TG выключен
+  # на хосте, повторять незачем → 0). set -e нет — прочие вызовы rc не смотрят.
   echo "${TS} selfcheck: notify-tg → ${reason}"
   if [[ -x "${NOTIFY_SCRIPT}" ]]; then
-    "${NOTIFY_SCRIPT}" "${SELFCHECK_UNIT}" || \
+    if ! "${NOTIFY_SCRIPT}" "${SELFCHECK_UNIT}"; then
       echo "${TS} selfcheck: notify-tg.sh завершился с ошибкой" >&2
+      return 1
+    fi
   fi
 }
+
+# Разовое предупреждение о скором истечении CRL — мимо FAIL-счётчика и
+# notified-флага, чтобы не маскировать другие инциденты. Флаг ставим только
+# при успешной отправке: упал TG — повторим на следующем прогоне.
+if [[ -n "${CRL_WARN}" && "$(cat "${CRL_WARNED_FILE}" 2>/dev/null)" != "${CRL_WARN}" ]]; then
+  if notify "CRL nextUpdate ${CRL_WARN} < ${CRL_WARN_DAYS}d"; then
+    echo "${CRL_WARN}" >"${CRL_WARNED_FILE}"
+  fi
+fi
 
 if [[ "${FAILS_N}" -eq 0 ]]; then
   echo "${TS} selfcheck OK (egress=${EGRESS:-?})"

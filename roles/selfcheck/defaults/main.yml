@@ -81,6 +81,18 @@ selfcheck_required_services:
   - fail2ban.service
   - nftables.service
 
+# CRL OpenVPN. С crl-verify просроченный CRL = отказ ВСЕМ клиентам при
+# active-юните — проверка сервисов это не ловит (так и легло 2026-11-04).
+#   истёк / файла нет      → FAIL (обычный порог + TG + recovery)
+#   до nextUpdate < N дней → разовое TG-предупреждение на каждый выпуск CRL,
+#                            в FAIL-счётчик не идёт (иначе месяц FAIL глушит
+#                            алёрты о других инцидентах через notified-флаг)
+# Роль openvpn сама перевыпускает CRL на apply при ovpn_crl_renew_days (60),
+# так что предупреждение = «прогнать make apply-from ROLES=openvpn».
+# Пустой путь — проверка выключена.
+selfcheck_ovpn_crl_path: "{{ ovpn_keys_dir | default('/etc/openvpn/server/keys') }}/crl.pem"
+selfcheck_ovpn_crl_warn_days: 30
+
 # Server public IP — против него сверяем egress (чтобы trafic не утекал
 # напрямую через WAN при упавшем sing-box).
 selfcheck_server_public_ip: "{{ server_public_ip | default(ansible_host) }}"
