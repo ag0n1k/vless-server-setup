@@ -6,6 +6,14 @@ ovpn_easyrsa_dir: /etc/openvpn/easy-rsa
 ovpn_ccd_dir: /etc/openvpn/ccd
 ovpn_log_dir: /var/log/openvpn
 
+# CRL. OpenVPN с crl-verify отвергает ВСЕХ клиентов, как только у CRL прошёл
+# nextUpdate ("CRL has expired") — сервис при этом остаётся active.
+# Дефолт easy-rsa — 180 дней; на vpn2 так и легло 2026-11-04.
+#   ovpn_crl_days       — срок жизни выпускаемого CRL (≈ срок CA)
+#   ovpn_crl_renew_days — перевыпустить, если до nextUpdate осталось меньше
+ovpn_crl_days: 3650
+ovpn_crl_renew_days: 60
+
 # Куда складывать сгенерированные .ovpn (только если CN явно запрошен).
 ovpn_clients_out_dir: /root/ovpn-clients
 

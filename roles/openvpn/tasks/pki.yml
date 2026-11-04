@@ -42,12 +42,31 @@
         chdir: "{{ ovpn_easyrsa_dir }}"
         creates: "{{ ovpn_easyrsa_dir }}/pki/issued/server.crt"
 
-    - name: easyrsa gen-crl
-      ansible.builtin.command: ./easyrsa --batch gen-crl
-      args:
-        chdir: "{{ ovpn_easyrsa_dir }}"
-        creates: "{{ ovpn_easyrsa_dir }}/pki/crl.pem"
   when: not easyrsa_ca.stat.exists
+
+# CRL не bootstrap-артефакт, а расходник с nextUpdate: проверяем срок на
+# каждом прогоне. Нет файла → TTL 0 → выпускаем.
+- name: CRL — секунд до nextUpdate
+  ansible.builtin.shell: |
+    set -o pipefail
+    crl={{ ovpn_easyrsa_dir }}/pki/crl.pem
+    [ -f "$crl" ] || { echo 0; exit 0; }
+    next=$(openssl crl -in "$crl" -noout -nextupdate | cut -d= -f2)
+    echo $(( $(date -d "$next" +%s) - $(date +%s) ))
+  args:
+    executable: /bin/bash
+  register: openvpn_crl_ttl
+  changed_when: false
+  check_mode: false
+
+- name: Перевыпустить CRL (нет файла или nextUpdate ближе ovpn_crl_renew_days)
+  ansible.builtin.command: ./easyrsa --batch gen-crl
+  args:
+    chdir: "{{ ovpn_easyrsa_dir }}"
+  environment:
+    EASYRSA_CRL_DAYS: "{{ ovpn_crl_days }}"
+  when: openvpn_crl_ttl.stdout | int < ovpn_crl_renew_days | int * 86400
+  changed_when: true
 
 - name: Создать tls-crypt key (если ещё нет)
   ansible.builtin.command: openvpn --genkey --secret {{ ovpn_keys_dir }}/ta.key
@@ -65,4 +84,13 @@
     - { src: "{{ ovpn_easyrsa_dir }}/pki/ca.crt",             dest: "{{ ovpn_keys_dir }}/ca.crt",     mode: "0644" }
     - { src: "{{ ovpn_easyrsa_dir }}/pki/issued/server.crt",  dest: "{{ ovpn_keys_dir }}/server.crt", mode: "0644" }
     - { src: "{{ ovpn_easyrsa_dir }}/pki/private/server.key", dest: "{{ ovpn_keys_dir }}/server.key", mode: "0600" }
-    - { src: "{{ ovpn_easyrsa_dir }}/pki/crl.pem",            dest: "{{ ovpn_keys_dir }}/crl.pem",    mode: "0644" }
+
+# В отличие от ключей выше — force: CRL обновляется (перевыпуск, revoke) и
+# должен доезжать до сервера. Рестарт не нужен: OpenVPN сам перечитывает
+# crl-verify при изменении файла, а рестарт уронил бы всех клиентов.
+- name: Синхронизировать CRL в {{ ovpn_keys_dir }}
+  ansible.builtin.copy:
+    src: "{{ ovpn_easyrsa_dir }}/pki/crl.pem"
+    dest: "{{ ovpn_keys_dir }}/crl.pem"
+    remote_src: true
+    mode: "0644"
