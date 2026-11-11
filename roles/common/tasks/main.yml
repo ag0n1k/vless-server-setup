@@ -61,3 +61,22 @@
     path: /etc/nftables.d
     state: directory
     mode: "0755"
+
+- name: Каталог /etc/systemd/journald.conf.d
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    mode: "0755"
+
+- name: Ограничить размер journald
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/50-vpn-gateway.conf
+    content: |
+      # Managed by Ansible (roles/common) — do not edit
+      [Journal]
+      SystemMaxUse={{ journald_system_max_use }}
+      SystemMaxFileSize={{ journald_system_max_file_size }}
+    mode: "0644"
+  notify:
+    - restart journald
+    - vacuum journald

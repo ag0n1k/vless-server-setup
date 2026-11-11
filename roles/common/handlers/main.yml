@@ -2,3 +2,14 @@
 - name: reload nftables
   ansible.builtin.command: nft -f /etc/nftables.conf
   listen: reload nftables
+
+- name: restart journald
+  ansible.builtin.systemd:
+    name: systemd-journald
+    state: restarted
+
+# journald сам подрезает архивы при ротации, но явный vacuum сразу освобождает
+# место. Читает только заголовки файлов — на большом журнале это быстро.
+- name: vacuum journald
+  ansible.builtin.command: journalctl --vacuum-size={{ journald_system_max_use }}
+  changed_when: true
